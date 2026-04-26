@@ -16,6 +16,8 @@ import Sedes from "./pages/Sedes";
 import Usuarios from "./pages/Usuarios";
 import Configuracion from "./pages/Configuracion";
 
+import SetPassword from "./pages/setPassword";
+
 import Footer from "./components/Footer";
 
 const getPage = (activePage, selectedSede) => {
@@ -42,6 +44,12 @@ export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
   const [selectedSede, setSelectedSede] = useState("Todas las sedes");
   const [currentUser, setCurrentUser] = useState(null);
+
+  const pathname = window.location.pathname;
+
+  if (pathname.includes("/set-password")) {
+    return <SetPassword />;
+  }
 
   if (!currentUser) {
     return <Login onLogin={setCurrentUser} />;
