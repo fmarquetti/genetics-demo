@@ -9,6 +9,7 @@ const sedes = [
     "Sede Pilar",
     "Sede Nueva 1",
     "Sede Nueva 2",
+    "Sede nacho",
 ];
 
 export default function Header({ selectedSede, setSelectedSede, currentUser, onLogout }) {
