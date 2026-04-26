@@ -1,42 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Eye, Power } from "lucide-react";
 import Modal from "../components/Modal";
-
-const initialSedes = [
-  {
-    id: 1,
-    sede: "Sede Centro",
-    sociedad: "Central Salud S.A.",
-    cuit: "30-71234567-8",
-    responsable: "Dr. Martín López",
-    direccion: "Av. San Martín 1250",
-    usuarios: 12,
-    estudiosMes: 1840,
-    estado: "Activa",
-  },
-  {
-    id: 2,
-    sede: "Sede Norte",
-    sociedad: "Centro Médico S.A.",
-    cuit: "30-70987654-2",
-    responsable: "Dra. Paula Ruiz",
-    direccion: "Belgrano 840",
-    usuarios: 8,
-    estudiosMes: 960,
-    estado: "Activa",
-  },
-  {
-    id: 3,
-    sede: "Sede Pilar",
-    sociedad: "Genetics Pilar S.R.L.",
-    cuit: "30-71888999-1",
-    responsable: "Lic. Ana Torres",
-    direccion: "Ruta 8 Km 52",
-    usuarios: 5,
-    estudiosMes: 420,
-    estado: "Activa",
-  },
-];
+import {
+  createSede,
+  deleteSede,
+  getSedes,
+  toggleSedeEstado,
+} from "../services/sedeService";
 
 function filterBySede(items, selectedSede) {
   if (!selectedSede || selectedSede === "Todas las sedes") return items;
@@ -44,21 +14,56 @@ function filterBySede(items, selectedSede) {
   return items.filter((item) => item.sede === selectedSede);
 }
 
+const emptyForm = {
+  sede: "",
+  sociedad: "",
+  razonSocial: "",
+  cuit: "",
+  ubicacion: "",
+  direccion: "",
+  responsable: "",
+};
+
 export default function Sedes({ selectedSede }) {
-  const [sedes, setSedes] = useState(initialSedes);
+  const [sedes, setSedes] = useState([]);
   const [search, setSearch] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("Todos");
   const [modal, setModal] = useState(null);
   const [selectedSedeDetalle, setSelectedSedeDetalle] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function loadSedes() {
+    setLoading(true);
+
+    try {
+      const data = await getSedes();
+      setSedes(data);
+    } catch (error) {
+      console.error("Error cargando sedes:", error);
+      alert(error.message || "No se pudieron cargar las sedes.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSedes();
+  }, []);
 
   const sedesPorFiltro = filterBySede(sedes, selectedSede);
 
   const sedesFiltradas = useMemo(() => {
     return sedesPorFiltro.filter((item) => {
+      const searchValue = search.toLowerCase();
+
       const matchSearch =
-        item.sede.toLowerCase().includes(search.toLowerCase()) ||
-        item.sociedad.toLowerCase().includes(search.toLowerCase()) ||
-        item.responsable.toLowerCase().includes(search.toLowerCase());
+        item.sede.toLowerCase().includes(searchValue) ||
+        item.sociedad.toLowerCase().includes(searchValue) ||
+        item.cuit.toLowerCase().includes(searchValue) ||
+        item.responsable.toLowerCase().includes(searchValue) ||
+        item.ubicacion.toLowerCase().includes(searchValue);
 
       const matchEstado =
         estadoFiltro === "Todos" || item.estado === estadoFiltro;
@@ -69,21 +74,59 @@ export default function Sedes({ selectedSede }) {
 
   const activas = sedesPorFiltro.filter((s) => s.estado === "Activa").length;
   const inactivas = sedesPorFiltro.filter((s) => s.estado === "Inactiva").length;
-  const totalUsuarios = sedesPorFiltro.reduce((acc, s) => acc + Number(s.usuarios), 0);
-  const totalEstudios = sedesPorFiltro.reduce((acc, s) => acc + Number(s.estudiosMes), 0);
+  const totalUsuarios = sedesPorFiltro.reduce(
+    (acc, s) => acc + Number(s.usuarios || 0),
+    0
+  );
+  const totalEstudios = sedesPorFiltro.reduce(
+    (acc, s) => acc + Number(s.estudiosMes || 0),
+    0
+  );
 
-  function toggleEstado(id) {
-    setSedes((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, estado: item.estado === "Activa" ? "Inactiva" : "Activa" }
-          : item
-      )
-    );
+  async function handleCreate(e) {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      await createSede(form);
+      await loadSedes();
+      setForm(emptyForm);
+      setModal(null);
+    } catch (error) {
+      console.error("Error creando sede:", error);
+      alert(error.message || "No se pudo crear la sede.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleDelete(id) {
-    setSedes((prev) => prev.filter((item) => item.id !== id));
+  async function handleToggleEstado(sede) {
+    try {
+      await toggleSedeEstado(sede);
+      await loadSedes();
+    } catch (error) {
+      console.error("Error actualizando sede:", error);
+      alert(error.message || "No se pudo actualizar la sede.");
+    }
+  }
+
+  async function handleDelete(id) {
+    const confirmDelete = window.confirm(
+      "¿Eliminar esta sede? Esta acción no se puede deshacer."
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      await deleteSede(id);
+      await loadSedes();
+    } catch (error) {
+      console.error("Error eliminando sede:", error);
+      alert(
+        error.message ||
+          "No se pudo eliminar la sede. Verificá que no tenga usuarios asociados."
+      );
+    }
   }
 
   function abrirDetalle(sede) {
@@ -91,15 +134,23 @@ export default function Sedes({ selectedSede }) {
     setModal("detalle");
   }
 
+  function abrirNuevaSede() {
+    setForm(emptyForm);
+    setModal("nueva");
+  }
+
   return (
     <section className="page">
       <div className="page-header">
         <div>
           <h2>Sociedades / Sedes</h2>
-          <p>Administración de sociedades, sucursales, responsables y operación multisede.</p>
+          <p>
+            Administración de sociedades, sucursales, responsables y operación
+            multisede.
+          </p>
         </div>
 
-        <button className="primary-button">
+        <button className="primary-button" onClick={abrirNuevaSede}>
           <Plus size={16} /> Nueva sede
         </button>
       </div>
@@ -140,12 +191,15 @@ export default function Sedes({ selectedSede }) {
 
       <div className="filters-bar">
         <input
-          placeholder="Buscar por sede, sociedad o responsable..."
+          placeholder="Buscar por sede, sociedad, CUIT, ubicación o responsable..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
 
-        <select value={estadoFiltro} onChange={(e) => setEstadoFiltro(e.target.value)}>
+        <select
+          value={estadoFiltro}
+          onChange={(e) => setEstadoFiltro(e.target.value)}
+        >
           <option>Todos</option>
           <option>Activa</option>
           <option>Inactiva</option>
@@ -157,49 +211,58 @@ export default function Sedes({ selectedSede }) {
           <thead>
             <tr>
               <th>Sede</th>
-              <th>Sociedad</th>
+              <th>Nombre fantasía</th>
               <th>CUIT</th>
+              <th>Ubicación</th>
               <th>Responsable</th>
               <th>Usuarios</th>
-              <th>Estudios mes</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
           </thead>
 
           <tbody>
-            {sedesFiltradas.map((item) => (
-              <tr key={item.id}>
-                <td>{item.sede}</td>
-                <td>{item.sociedad}</td>
-                <td>{item.cuit}</td>
-                <td>{item.responsable}</td>
-                <td>{item.usuarios}</td>
-                <td>{item.estudiosMes.toLocaleString("es-AR")}</td>
-                <td>
-                  <span className={`status-badge ${item.estado.toLowerCase()}`}>
-                    {item.estado}
-                  </span>
-                </td>
-                <td>
-                  <div className="table-actions">
-                    <button onClick={() => abrirDetalle(item)}>
-                      <Eye size={16} />
-                    </button>
-
-                    <button onClick={() => toggleEstado(item.id)}>
-                      <Power size={16} />
-                    </button>
-
-                    <button onClick={() => handleDelete(item.id)}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
+            {loading && (
+              <tr>
+                <td colSpan="8">Cargando sedes...</td>
               </tr>
-            ))}
+            )}
 
-            {sedesFiltradas.length === 0 && (
+            {!loading &&
+              sedesFiltradas.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.sede}</td>
+                  <td>{item.sociedad}</td>
+                  <td>{item.cuit}</td>
+                  <td>{item.ubicacion || "-"}</td>
+                  <td>{item.responsable || "-"}</td>
+                  <td>{item.usuarios}</td>
+                  <td>
+                    <span
+                      className={`status-badge ${item.estado.toLowerCase()}`}
+                    >
+                      {item.estado}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="table-actions">
+                      <button onClick={() => abrirDetalle(item)}>
+                        <Eye size={16} />
+                      </button>
+
+                      <button onClick={() => handleToggleEstado(item)}>
+                        <Power size={16} />
+                      </button>
+
+                      <button onClick={() => handleDelete(item.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+            {!loading && sedesFiltradas.length === 0 && (
               <tr>
                 <td colSpan="8">No se encontraron sedes.</td>
               </tr>
@@ -208,12 +271,114 @@ export default function Sedes({ selectedSede }) {
         </table>
       </div>
 
+      {modal === "nueva" && (
+        <Modal title="Nueva sede / sociedad" onClose={() => setModal(null)}>
+          <form className="form-grid" onSubmit={handleCreate}>
+            <label>
+              Nombre de sede
+              <input
+                required
+                placeholder="Ej: Sede Centro"
+                value={form.sede}
+                onChange={(e) => setForm({ ...form, sede: e.target.value })}
+              />
+            </label>
+
+            <label>
+              Nombre fantasía
+              <input
+                required
+                placeholder="Ej: Genetics Centro"
+                value={form.sociedad}
+                onChange={(e) => setForm({ ...form, sociedad: e.target.value })}
+              />
+            </label>
+
+            <label>
+              Razón social
+              <input
+                placeholder="Ej: Genetics Salud S.A."
+                value={form.razonSocial}
+                onChange={(e) =>
+                  setForm({ ...form, razonSocial: e.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              CUIT
+              <input
+                required
+                placeholder="Ej: 30-71234567-8"
+                value={form.cuit}
+                onChange={(e) => setForm({ ...form, cuit: e.target.value })}
+              />
+            </label>
+
+            <label>
+              Ubicación
+              <input
+                placeholder="Ej: Mendoza, Ciudad"
+                value={form.ubicacion}
+                onChange={(e) =>
+                  setForm({ ...form, ubicacion: e.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              Responsable
+              <input
+                placeholder="Ej: Dr. Martín López"
+                value={form.responsable}
+                onChange={(e) =>
+                  setForm({ ...form, responsable: e.target.value })
+                }
+              />
+            </label>
+
+            <label className="full">
+              Dirección
+              <input
+                placeholder="Ej: Av. San Martín 1250"
+                value={form.direccion}
+                onChange={(e) =>
+                  setForm({ ...form, direccion: e.target.value })
+                }
+              />
+            </label>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setModal(null)}
+              >
+                Cancelar
+              </button>
+
+              <button type="submit" className="primary-button" disabled={saving}>
+                {saving ? "Guardando..." : "Crear sede"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {modal === "detalle" && selectedSedeDetalle && (
-        <Modal title={`Detalle de ${selectedSedeDetalle.sede}`} onClose={() => setModal(null)}>
+        <Modal
+          title={`Detalle de ${selectedSedeDetalle.sede}`}
+          onClose={() => setModal(null)}
+        >
           <div className="detail-grid">
             <div>
-              <span>Sociedad</span>
+              <span>Nombre fantasía</span>
               <strong>{selectedSedeDetalle.sociedad}</strong>
+            </div>
+
+            <div>
+              <span>Razón social</span>
+              <strong>{selectedSedeDetalle.razonSocial || "-"}</strong>
             </div>
 
             <div>
@@ -222,8 +387,13 @@ export default function Sedes({ selectedSede }) {
             </div>
 
             <div>
+              <span>Ubicación</span>
+              <strong>{selectedSedeDetalle.ubicacion || "-"}</strong>
+            </div>
+
+            <div>
               <span>Responsable</span>
-              <strong>{selectedSedeDetalle.responsable}</strong>
+              <strong>{selectedSedeDetalle.responsable || "-"}</strong>
             </div>
 
             <div>
@@ -233,7 +403,7 @@ export default function Sedes({ selectedSede }) {
 
             <div className="full">
               <span>Dirección</span>
-              <strong>{selectedSedeDetalle.direccion}</strong>
+              <strong>{selectedSedeDetalle.direccion || "-"}</strong>
             </div>
           </div>
         </Modal>
