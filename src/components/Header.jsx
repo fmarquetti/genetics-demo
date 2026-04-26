@@ -1,4 +1,4 @@
-import { Bell, Search } from "lucide-react";
+import { Bell, Search, LogOut } from "lucide-react";
 
 const sedes = [
     "Todas las sedes",
@@ -35,16 +35,13 @@ export default function Header({ selectedSede, setSelectedSede, currentUser, onL
                     <span className="sede-indicator">Vista: {currentUser.sede}</span>
                 )}
 
-                <span className="sede-indicator">
-                    Vista: {selectedSede}
-                </span>
-
                 <button className="icon-button">
                     <Bell size={18} />
                 </button>
 
-                <button className="secondary-button" onClick={onLogout}>
-                    Salir
+                <button className="secondary-button" onClick={onLogout} title="Cerrar sesión">
+                    <LogOut size={16} />
+                    <span>Salir</span>
                 </button>
             </div>
         </header>
