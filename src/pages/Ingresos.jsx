@@ -1,47 +1,18 @@
-import { useMemo, useRef, useState } from "react";
-import { Plus, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Trash2, Upload, ExternalLink } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import jsQR from "jsqr";
 import Modal from "../components/Modal";
+import {
+  createIngreso,
+  deleteIngreso,
+  getIngresos,
+  marcarIngresoCobrado,
+} from "../services/ingresoService";
+import { getSedes } from "../services/sedeService";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-
-const initialIngresos = [
-  {
-    id: 1,
-    fecha: "31/05/2025",
-    concepto: "Pago OSDE",
-    sociedad: "Central Salud S.A.",
-    sede: "Sede Centro",
-    origen: "Obra Social",
-    importe: 1250000,
-    cobro: "Transferencia",
-    estado: "Cobrado",
-  },
-  {
-    id: 2,
-    fecha: "30/05/2025",
-    concepto: "Pago Swiss Medical",
-    sociedad: "Centro Médico S.A.",
-    sede: "Sede Norte",
-    origen: "Prepaga",
-    importe: 960000,
-    cobro: "Transferencia",
-    estado: "Cobrado",
-  },
-  {
-    id: 3,
-    fecha: "30/05/2025",
-    concepto: "Pacientes particulares",
-    sociedad: "Central Salud S.A.",
-    sede: "Sede Centro",
-    origen: "Particular",
-    importe: 220000,
-    cobro: "Efectivo",
-    estado: "Pendiente",
-  },
-];
 
 function filterBySede(items, selectedSede) {
   if (!selectedSede || selectedSede === "Todas las sedes") return items;
@@ -52,7 +23,10 @@ const formatMoney = (value) => `$ ${Number(value).toLocaleString("es-AR")}`;
 
 function decodeBase64Url(base64Url) {
   const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  const padded = base64.padEnd(
+    base64.length + ((4 - (base64.length % 4)) % 4),
+    "="
+  );
   const jsonString = decodeURIComponent(escape(atob(padded)));
   return JSON.parse(jsonString);
 }
@@ -85,48 +59,81 @@ function tipoComprobanteLabel(codigo) {
   return tipos[codigo] || `Comprobante ${codigo}`;
 }
 
-function formatFecha(fecha) {
+function formatFechaInput(fecha) {
   if (!fecha) return "";
+  if (fecha.includes("-")) return fecha;
 
-  if (fecha.includes("-")) {
-    const [yyyy, mm, dd] = fecha.split("-");
-    return `${dd}/${mm}/${yyyy}`;
-  }
-
-  return fecha;
+  const [dd, mm, yyyy] = fecha.split("/");
+  return `${yyyy}-${mm}-${dd}`;
 }
+
+const emptyForm = {
+  fecha: "",
+  concepto: "",
+  sociedad: "",
+  sedeId: "",
+  origen: "Obra Social",
+  importe: "",
+  cobro: "Transferencia",
+  estado: "Pendiente",
+};
 
 export default function Ingresos({ selectedSede }) {
   const facturaInputRef = useRef(null);
 
-  const [ingresos, setIngresos] = useState(initialIngresos);
+  const [ingresos, setIngresos] = useState([]);
+  const [sedes, setSedes] = useState([]);
   const [search, setSearch] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("Todos");
   const [modal, setModal] = useState(null);
   const [importandoFactura, setImportandoFactura] = useState(false);
   const [ingresoPendiente, setIngresoPendiente] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function loadData() {
+    setLoading(true);
+
+    try {
+      const [ingresosData, sedesData] = await Promise.all([
+        getIngresos(),
+        getSedes(),
+      ]);
+
+      setIngresos(ingresosData);
+      setSedes(sedesData);
+
+      setForm((prev) => ({
+        ...prev,
+        sedeId: prev.sedeId || sedesData[0]?.id || "",
+      }));
+    } catch (error) {
+      console.error("Error cargando ingresos:", error);
+      alert(error.message || "No se pudieron cargar los ingresos.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const ingresosPorSede = filterBySede(ingresos, selectedSede);
 
-  const [form, setForm] = useState({
-    fecha: "",
-    concepto: "",
-    sociedad: "",
-    sede: "Sede Centro",
-    origen: "Obra Social",
-    importe: "",
-    cobro: "Transferencia",
-    estado: "Pendiente",
-  });
-
   const ingresosFiltrados = useMemo(() => {
     return ingresosPorSede.filter((item) => {
-      const matchSearch =
-        item.concepto.toLowerCase().includes(search.toLowerCase()) ||
-        item.sociedad.toLowerCase().includes(search.toLowerCase()) ||
-        item.origen.toLowerCase().includes(search.toLowerCase());
+      const searchValue = search.toLowerCase();
 
-      const matchEstado = estadoFiltro === "Todos" || item.estado === estadoFiltro;
+      const matchSearch =
+        item.concepto.toLowerCase().includes(searchValue) ||
+        item.sociedad.toLowerCase().includes(searchValue) ||
+        item.origen.toLowerCase().includes(searchValue) ||
+        item.sede.toLowerCase().includes(searchValue);
+
+      const matchEstado =
+        estadoFiltro === "Todos" || item.estado === estadoFiltro;
 
       return matchSearch && matchEstado;
     });
@@ -140,40 +147,49 @@ export default function Ingresos({ selectedSede }) {
     .filter((i) => i.estado === "Pendiente")
     .reduce((acc, i) => acc + Number(i.importe), 0);
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
+    setSaving(true);
 
-    setIngresos((prev) => [
-      {
-        id: Date.now(),
-        ...form,
-        importe: Number(form.importe),
-      },
-      ...prev,
-    ]);
+    try {
+      await createIngreso(form);
+      await loadData();
 
-    setForm({
-      fecha: "",
-      concepto: "",
-      sociedad: "",
-      sede: "Sede Centro",
-      origen: "Obra Social",
-      importe: "",
-      cobro: "Transferencia",
-      estado: "Pendiente",
-    });
+      setForm({
+        ...emptyForm,
+        sedeId: sedes[0]?.id || "",
+      });
 
-    setModal(null);
+      setModal(null);
+    } catch (error) {
+      console.error("Error creando ingreso:", error);
+      alert(error.message || "No se pudo crear el ingreso.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleDelete(id) {
-    setIngresos((prev) => prev.filter((item) => item.id !== id));
+  async function handleDelete(id) {
+    const confirmDelete = window.confirm("¿Eliminar este ingreso?");
+    if (!confirmDelete) return;
+
+    try {
+      await deleteIngreso(id);
+      await loadData();
+    } catch (error) {
+      console.error("Error eliminando ingreso:", error);
+      alert(error.message || "No se pudo eliminar el ingreso.");
+    }
   }
 
-  function marcarCobrado(id) {
-    setIngresos((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, estado: "Cobrado" } : item))
-    );
+  async function marcarCobrado(id) {
+    try {
+      await marcarIngresoCobrado(id);
+      await loadData();
+    } catch (error) {
+      console.error("Error marcando ingreso:", error);
+      alert(error.message || "No se pudo marcar como cobrado.");
+    }
   }
 
   async function leerQRDesdePDF(file) {
@@ -218,12 +234,16 @@ export default function Ingresos({ selectedSede }) {
       const puntoVenta = String(datos.ptoVta || "").padStart(4, "0");
       const numeroComprobante = String(datos.nroCmp || "").padStart(8, "0");
 
+      const sedeDefault =
+        selectedSede && selectedSede !== "Todas las sedes"
+          ? sedes.find((s) => s.nombre === selectedSede)
+          : sedes[0];
+
       setIngresoPendiente({
-        id: Date.now(),
-        fecha: formatFecha(datos.fecha),
+        fecha: formatFechaInput(datos.fecha),
         concepto: "",
         sociedad: `CUIT ${datos.cuit}`,
-        sede: selectedSede && selectedSede !== "Todas las sedes" ? selectedSede : "Todas",
+        sedeId: sedeDefault?.id || "",
         origen: "Factura fiscal",
         importe: Number(datos.importe || 0),
         cobro: "Transferencia",
@@ -248,7 +268,7 @@ export default function Ingresos({ selectedSede }) {
     }
   }
 
-  function confirmarIngresoImportado(e) {
+  async function confirmarIngresoImportado(e) {
     e.preventDefault();
 
     if (!ingresoPendiente.concepto.trim()) {
@@ -256,9 +276,28 @@ export default function Ingresos({ selectedSede }) {
       return;
     }
 
-    setIngresos((prev) => [ingresoPendiente, ...prev]);
-    setIngresoPendiente(null);
-    setModal(null);
+    setSaving(true);
+
+    try {
+      await createIngreso(ingresoPendiente);
+      await loadData();
+      setIngresoPendiente(null);
+      setModal(null);
+    } catch (error) {
+      console.error("Error guardando factura importada:", error);
+      alert(error.message || "No se pudo guardar el ingreso importado.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function verAfip(qrUrl) {
+    if (!qrUrl) {
+      alert("Este comprobante no tiene URL fiscal disponible.");
+      return;
+    }
+
+    window.open(qrUrl, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -313,7 +352,7 @@ export default function Ingresos({ selectedSede }) {
 
       <div className="filters-bar">
         <input
-          placeholder="Buscar por concepto, sociedad u origen..."
+          placeholder="Buscar por concepto, sociedad, sede u origen..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -342,35 +381,53 @@ export default function Ingresos({ selectedSede }) {
           </thead>
 
           <tbody>
-            {ingresosFiltrados.map((item) => (
-              <tr key={item.id}>
-                <td>{item.fecha}</td>
-                <td>{item.concepto}</td>
-                <td>{item.sociedad}</td>
-                <td>{item.sede}</td>
-                <td>{item.origen}</td>
-                <td>{formatMoney(item.importe)}</td>
-                <td>{item.cobro}</td>
-                <td>
-                  <span className={`status-badge ${item.estado.toLowerCase()}`}>
-                    {item.estado}
-                  </span>
-                </td>
-                <td>
-                  <div className="table-actions">
-                    {item.estado === "Pendiente" && (
-                      <button onClick={() => marcarCobrado(item.id)}>✓</button>
-                    )}
-
-                    <button onClick={() => handleDelete(item.id)}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
+            {loading && (
+              <tr>
+                <td colSpan="9">Cargando ingresos...</td>
               </tr>
-            ))}
+            )}
 
-            {ingresosFiltrados.length === 0 && (
+            {!loading &&
+              ingresosFiltrados.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.fecha}</td>
+                  <td>{item.concepto}</td>
+                  <td>{item.sociedad}</td>
+                  <td>{item.sede}</td>
+                  <td>{item.origen}</td>
+                  <td>{formatMoney(item.importe)}</td>
+                  <td>{item.cobro}</td>
+                  <td>
+                    <span className={`status-badge ${item.estado.toLowerCase()}`}>
+                      {item.estado}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="table-actions">
+                      {item.datosFiscales?.qrUrl && (
+                        <button
+                          title="Ver comprobante en AFIP"
+                          onClick={() => verAfip(item.datosFiscales.qrUrl)}
+                        >
+                          <ExternalLink size={16} />
+                        </button>
+                      )}
+
+                      {item.estado === "Pendiente" && (
+                        <button title="Marcar como cobrado" onClick={() => marcarCobrado(item.id)}>
+                          ✓
+                        </button>
+                      )}
+
+                      <button title="Eliminar ingreso" onClick={() => handleDelete(item.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+            {!loading && ingresosFiltrados.length === 0 && (
               <tr>
                 <td colSpan="9">No se encontraron ingresos.</td>
               </tr>
@@ -403,18 +460,25 @@ export default function Ingresos({ selectedSede }) {
 
             <label>
               Sede
-              <select value={form.sede} onChange={(e) => setForm({ ...form, sede: e.target.value })}>
-                <option>Sede Centro</option>
-                <option>Sede Norte</option>
-                <option>Sede Sur</option>
-                <option>Sede Oeste</option>
-                <option>Sede Pilar</option>
+              <select
+                value={form.sedeId}
+                onChange={(e) => setForm({ ...form, sedeId: e.target.value })}
+                required
+              >
+                {sedes.map((sede) => (
+                  <option key={sede.id} value={sede.id}>
+                    {sede.nombre}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label>
               Origen
-              <select value={form.origen} onChange={(e) => setForm({ ...form, origen: e.target.value })}>
+              <select
+                value={form.origen}
+                onChange={(e) => setForm({ ...form, origen: e.target.value })}
+              >
                 <option>Obra Social</option>
                 <option>Prepaga</option>
                 <option>Particular</option>
@@ -434,7 +498,10 @@ export default function Ingresos({ selectedSede }) {
 
             <label>
               Forma de cobro
-              <select value={form.cobro} onChange={(e) => setForm({ ...form, cobro: e.target.value })}>
+              <select
+                value={form.cobro}
+                onChange={(e) => setForm({ ...form, cobro: e.target.value })}
+              >
                 <option>Transferencia</option>
                 <option>Efectivo</option>
                 <option>Tarjeta</option>
@@ -456,8 +523,8 @@ export default function Ingresos({ selectedSede }) {
                 Cancelar
               </button>
 
-              <button type="submit" className="primary-button">
-                Guardar ingreso
+              <button type="submit" className="primary-button" disabled={saving}>
+                {saving ? "Guardando..." : "Guardar ingreso"}
               </button>
             </div>
           </form>
@@ -476,6 +543,7 @@ export default function Ingresos({ selectedSede }) {
             <label>
               Fecha
               <input
+                type="date"
                 required
                 value={ingresoPendiente.fecha}
                 onChange={(e) =>
@@ -503,17 +571,17 @@ export default function Ingresos({ selectedSede }) {
             <label>
               Sede
               <select
-                value={ingresoPendiente.sede}
+                value={ingresoPendiente.sedeId}
                 onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, sede: e.target.value })
+                  setIngresoPendiente({ ...ingresoPendiente, sedeId: e.target.value })
                 }
+                required
               >
-                <option>Todas</option>
-                <option>Sede Centro</option>
-                <option>Sede Norte</option>
-                <option>Sede Sur</option>
-                <option>Sede Oeste</option>
-                <option>Sede Pilar</option>
+                {sedes.map((sede) => (
+                  <option key={sede.id} value={sede.id}>
+                    {sede.nombre}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -526,7 +594,7 @@ export default function Ingresos({ selectedSede }) {
                 onChange={(e) =>
                   setIngresoPendiente({
                     ...ingresoPendiente,
-                    importe: Number(e.target.value),
+                    importe: e.target.value,
                   })
                 }
               />
@@ -579,7 +647,7 @@ export default function Ingresos({ selectedSede }) {
               Concepto real del ingreso
               <input
                 required
-                placeholder="Ej: Reactivos de laboratorio, servicio técnico, pago de práctica médica..."
+                placeholder="Ej: Pago de práctica médica, acreditación de obra social..."
                 value={ingresoPendiente.concepto}
                 onChange={(e) =>
                   setIngresoPendiente({ ...ingresoPendiente, concepto: e.target.value })
@@ -614,8 +682,8 @@ export default function Ingresos({ selectedSede }) {
                 Cancelar
               </button>
 
-              <button type="submit" className="primary-button">
-                Confirmar y guardar
+              <button type="submit" className="primary-button" disabled={saving}>
+                {saving ? "Guardando..." : "Confirmar y guardar"}
               </button>
             </div>
           </form>

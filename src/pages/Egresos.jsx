@@ -1,47 +1,18 @@
-import { useMemo, useRef, useState } from "react";
-import { Plus, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Trash2, Upload, ExternalLink } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import jsQR from "jsqr";
 import Modal from "../components/Modal";
+import {
+  createEgreso,
+  deleteEgreso,
+  getEgresos,
+  marcarEgresoPagado,
+} from "../services/egresoService";
+import { getSedes } from "../services/sedeService";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-
-const initialEgresos = [
-  {
-    id: 1,
-    fecha: "31/05/2025",
-    proveedor: "Droguería del Sur",
-    sociedad: "Central Salud S.A.",
-    sede: "Sede Centro",
-    concepto: "Insumos médicos",
-    importe: 320000,
-    categoria: "Insumos",
-    estado: "Pagado",
-  },
-  {
-    id: 2,
-    fecha: "30/05/2025",
-    proveedor: "Edenor",
-    sociedad: "Centro Médico S.A.",
-    sede: "Sede Norte",
-    concepto: "Servicio eléctrico",
-    importe: 160000,
-    categoria: "Servicios",
-    estado: "Pendiente",
-  },
-  {
-    id: 3,
-    fecha: "29/05/2025",
-    proveedor: "Laboratorios BACON",
-    sociedad: "Sede Norte",
-    sede: "Sede Norte",
-    concepto: "Reactivos",
-    importe: 250000,
-    categoria: "Reactivos",
-    estado: "Pendiente",
-  },
-];
 
 function filterBySede(items, selectedSede) {
   if (!selectedSede || selectedSede === "Todas las sedes") return items;
@@ -52,7 +23,10 @@ const formatMoney = (value) => `$ ${Number(value).toLocaleString("es-AR")}`;
 
 function decodeBase64Url(base64Url) {
   const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  const padded = base64.padEnd(
+    base64.length + ((4 - (base64.length % 4)) % 4),
+    "="
+  );
   const jsonString = decodeURIComponent(escape(atob(padded)));
   return JSON.parse(jsonString);
 }
@@ -85,48 +59,82 @@ function tipoComprobanteLabel(codigo) {
   return tipos[codigo] || `Comprobante ${codigo}`;
 }
 
-function formatFecha(fecha) {
+function formatFechaInput(fecha) {
   if (!fecha) return "";
+  if (fecha.includes("-")) return fecha;
 
-  if (fecha.includes("-")) {
-    const [yyyy, mm, dd] = fecha.split("-");
-    return `${dd}/${mm}/${yyyy}`;
-  }
-
-  return fecha;
+  const [dd, mm, yyyy] = fecha.split("/");
+  return `${yyyy}-${mm}-${dd}`;
 }
+
+const emptyForm = {
+  fecha: "",
+  proveedor: "",
+  sociedad: "",
+  sedeId: "",
+  concepto: "",
+  importe: "",
+  categoria: "Insumos",
+  estado: "Pendiente",
+};
 
 export default function Egresos({ selectedSede }) {
   const facturaInputRef = useRef(null);
 
-  const [egresos, setEgresos] = useState(initialEgresos);
+  const [egresos, setEgresos] = useState([]);
+  const [sedes, setSedes] = useState([]);
   const [search, setSearch] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("Todos");
   const [modal, setModal] = useState(null);
   const [importandoFactura, setImportandoFactura] = useState(false);
   const [egresoPendiente, setEgresoPendiente] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function loadData() {
+    setLoading(true);
+
+    try {
+      const [egresosData, sedesData] = await Promise.all([
+        getEgresos(),
+        getSedes(),
+      ]);
+
+      setEgresos(egresosData);
+      setSedes(sedesData);
+
+      setForm((prev) => ({
+        ...prev,
+        sedeId: prev.sedeId || sedesData[0]?.id || "",
+      }));
+    } catch (error) {
+      console.error("Error cargando egresos:", error);
+      alert(error.message || "No se pudieron cargar los egresos.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const egresosPorSede = filterBySede(egresos, selectedSede);
 
-  const [form, setForm] = useState({
-    fecha: "",
-    proveedor: "",
-    sociedad: "",
-    sede: "Sede Centro",
-    concepto: "",
-    importe: "",
-    categoria: "Insumos",
-    estado: "Pendiente",
-  });
-
   const egresosFiltrados = useMemo(() => {
     return egresosPorSede.filter((item) => {
-      const matchSearch =
-        item.proveedor.toLowerCase().includes(search.toLowerCase()) ||
-        item.concepto.toLowerCase().includes(search.toLowerCase()) ||
-        item.categoria.toLowerCase().includes(search.toLowerCase());
+      const searchValue = search.toLowerCase();
 
-      const matchEstado = estadoFiltro === "Todos" || item.estado === estadoFiltro;
+      const matchSearch =
+        item.proveedor.toLowerCase().includes(searchValue) ||
+        item.sociedad.toLowerCase().includes(searchValue) ||
+        item.sede.toLowerCase().includes(searchValue) ||
+        item.concepto.toLowerCase().includes(searchValue) ||
+        item.categoria.toLowerCase().includes(searchValue);
+
+      const matchEstado =
+        estadoFiltro === "Todos" || item.estado === estadoFiltro;
 
       return matchSearch && matchEstado;
     });
@@ -140,40 +148,49 @@ export default function Egresos({ selectedSede }) {
     .filter((e) => e.estado === "Pendiente")
     .reduce((acc, e) => acc + Number(e.importe), 0);
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
+    setSaving(true);
 
-    setEgresos((prev) => [
-      {
-        id: Date.now(),
-        ...form,
-        importe: Number(form.importe),
-      },
-      ...prev,
-    ]);
+    try {
+      await createEgreso(form);
+      await loadData();
 
-    setForm({
-      fecha: "",
-      proveedor: "",
-      sociedad: "",
-      sede: "Sede Centro",
-      concepto: "",
-      importe: "",
-      categoria: "Insumos",
-      estado: "Pendiente",
-    });
+      setForm({
+        ...emptyForm,
+        sedeId: sedes[0]?.id || "",
+      });
 
-    setModal(null);
+      setModal(null);
+    } catch (error) {
+      console.error("Error creando egreso:", error);
+      alert(error.message || "No se pudo crear el egreso.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleDelete(id) {
-    setEgresos((prev) => prev.filter((item) => item.id !== id));
+  async function handleDelete(id) {
+    const confirmDelete = window.confirm("¿Eliminar este egreso?");
+    if (!confirmDelete) return;
+
+    try {
+      await deleteEgreso(id);
+      await loadData();
+    } catch (error) {
+      console.error("Error eliminando egreso:", error);
+      alert(error.message || "No se pudo eliminar el egreso.");
+    }
   }
 
-  function marcarPagado(id) {
-    setEgresos((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, estado: "Pagado" } : item))
-    );
+  async function marcarPagado(id) {
+    try {
+      await marcarEgresoPagado(id);
+      await loadData();
+    } catch (error) {
+      console.error("Error marcando egreso:", error);
+      alert(error.message || "No se pudo marcar como pagado.");
+    }
   }
 
   async function leerQRDesdePDF(file) {
@@ -218,12 +235,16 @@ export default function Egresos({ selectedSede }) {
       const puntoVenta = String(datos.ptoVta || "").padStart(4, "0");
       const numeroComprobante = String(datos.nroCmp || "").padStart(8, "0");
 
+      const sedeDefault =
+        selectedSede && selectedSede !== "Todas las sedes"
+          ? sedes.find((s) => s.nombre === selectedSede)
+          : sedes[0];
+
       setEgresoPendiente({
-        id: Date.now(),
-        fecha: formatFecha(datos.fecha),
+        fecha: formatFechaInput(datos.fecha),
         proveedor: `CUIT ${datos.cuit}`,
         sociedad: "",
-        sede: selectedSede && selectedSede !== "Todas las sedes" ? selectedSede : "Todas",
+        sedeId: sedeDefault?.id || "",
         concepto: "",
         importe: Number(datos.importe || 0),
         categoria: "Insumos",
@@ -248,7 +269,7 @@ export default function Egresos({ selectedSede }) {
     }
   }
 
-  function confirmarEgresoImportado(e) {
+  async function confirmarEgresoImportado(e) {
     e.preventDefault();
 
     if (!egresoPendiente.concepto.trim()) {
@@ -261,9 +282,28 @@ export default function Egresos({ selectedSede }) {
       return;
     }
 
-    setEgresos((prev) => [egresoPendiente, ...prev]);
-    setEgresoPendiente(null);
-    setModal(null);
+    setSaving(true);
+
+    try {
+      await createEgreso(egresoPendiente);
+      await loadData();
+      setEgresoPendiente(null);
+      setModal(null);
+    } catch (error) {
+      console.error("Error guardando factura importada:", error);
+      alert(error.message || "No se pudo guardar el egreso importado.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function verAfip(qrUrl) {
+    if (!qrUrl) {
+      alert("Este comprobante no tiene URL fiscal disponible.");
+      return;
+    }
+
+    window.open(qrUrl, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -318,7 +358,7 @@ export default function Egresos({ selectedSede }) {
 
       <div className="filters-bar">
         <input
-          placeholder="Buscar por proveedor, concepto o categoría..."
+          placeholder="Buscar por proveedor, sociedad, sede, concepto o categoría..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -347,35 +387,53 @@ export default function Egresos({ selectedSede }) {
           </thead>
 
           <tbody>
-            {egresosFiltrados.map((item) => (
-              <tr key={item.id}>
-                <td>{item.fecha}</td>
-                <td>{item.proveedor}</td>
-                <td>{item.sociedad}</td>
-                <td>{item.sede}</td>
-                <td>{item.concepto}</td>
-                <td>{item.categoria}</td>
-                <td>{formatMoney(item.importe)}</td>
-                <td>
-                  <span className={`status-badge ${item.estado.toLowerCase()}`}>
-                    {item.estado}
-                  </span>
-                </td>
-                <td>
-                  <div className="table-actions">
-                    {item.estado === "Pendiente" && (
-                      <button onClick={() => marcarPagado(item.id)}>✓</button>
-                    )}
-
-                    <button onClick={() => handleDelete(item.id)}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
+            {loading && (
+              <tr>
+                <td colSpan="9">Cargando egresos...</td>
               </tr>
-            ))}
+            )}
 
-            {egresosFiltrados.length === 0 && (
+            {!loading &&
+              egresosFiltrados.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.fecha}</td>
+                  <td>{item.proveedor}</td>
+                  <td>{item.sociedad}</td>
+                  <td>{item.sede}</td>
+                  <td>{item.concepto}</td>
+                  <td>{item.categoria}</td>
+                  <td>{formatMoney(item.importe)}</td>
+                  <td>
+                    <span className={`status-badge ${item.estado.toLowerCase()}`}>
+                      {item.estado}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="table-actions">
+                      {item.datosFiscales?.qrUrl && (
+                        <button
+                          title="Ver comprobante en AFIP"
+                          onClick={() => verAfip(item.datosFiscales.qrUrl)}
+                        >
+                          <ExternalLink size={16} />
+                        </button>
+                      )}
+
+                      {item.estado === "Pendiente" && (
+                        <button title="Marcar como pagado" onClick={() => marcarPagado(item.id)}>
+                          ✓
+                        </button>
+                      )}
+
+                      <button title="Eliminar egreso" onClick={() => handleDelete(item.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+            {!loading && egresosFiltrados.length === 0 && (
               <tr>
                 <td colSpan="9">No se encontraron egresos.</td>
               </tr>
@@ -418,14 +476,15 @@ export default function Egresos({ selectedSede }) {
             <label>
               Sede
               <select
-                value={form.sede}
-                onChange={(e) => setForm({ ...form, sede: e.target.value })}
+                value={form.sedeId}
+                onChange={(e) => setForm({ ...form, sedeId: e.target.value })}
+                required
               >
-                <option>Sede Centro</option>
-                <option>Sede Norte</option>
-                <option>Sede Sur</option>
-                <option>Sede Oeste</option>
-                <option>Sede Pilar</option>
+                {sedes.map((sede) => (
+                  <option key={sede.id} value={sede.id}>
+                    {sede.nombre}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -467,8 +526,9 @@ export default function Egresos({ selectedSede }) {
               <button type="button" className="secondary-button" onClick={() => setModal(null)}>
                 Cancelar
               </button>
-              <button type="submit" className="primary-button">
-                Guardar egreso
+
+              <button type="submit" className="primary-button" disabled={saving}>
+                {saving ? "Guardando..." : "Guardar egreso"}
               </button>
             </div>
           </form>
@@ -488,6 +548,7 @@ export default function Egresos({ selectedSede }) {
             <label>
               Fecha
               <input
+                type="date"
                 required
                 value={egresoPendiente.fecha}
                 onChange={(e) =>
@@ -527,17 +588,17 @@ export default function Egresos({ selectedSede }) {
             <label>
               Sede
               <select
-                value={egresoPendiente.sede}
+                value={egresoPendiente.sedeId}
                 onChange={(e) =>
-                  setEgresoPendiente({ ...egresoPendiente, sede: e.target.value })
+                  setEgresoPendiente({ ...egresoPendiente, sedeId: e.target.value })
                 }
+                required
               >
-                <option>Todas</option>
-                <option>Sede Centro</option>
-                <option>Sede Norte</option>
-                <option>Sede Sur</option>
-                <option>Sede Oeste</option>
-                <option>Sede Pilar</option>
+                {sedes.map((sede) => (
+                  <option key={sede.id} value={sede.id}>
+                    {sede.nombre}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -567,7 +628,7 @@ export default function Egresos({ selectedSede }) {
                 onChange={(e) =>
                   setEgresoPendiente({
                     ...egresoPendiente,
-                    importe: Number(e.target.value),
+                    importe: e.target.value,
                   })
                 }
               />
@@ -625,8 +686,8 @@ export default function Egresos({ selectedSede }) {
                 Cancelar
               </button>
 
-              <button type="submit" className="primary-button">
-                Confirmar y guardar
+              <button type="submit" className="primary-button" disabled={saving}>
+                {saving ? "Guardando..." : "Confirmar y guardar"}
               </button>
             </div>
           </form>
