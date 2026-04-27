@@ -1,50 +1,74 @@
+import { useEffect, useState } from "react";
 import { Bell, Search, LogOut } from "lucide-react";
+import { getSedes } from "../services/sedeService";
 
-const sedes = [
-    "Todas las sedes",
-    "Sede Centro",
-    "Sede Norte",
-    "Sede Sur",
-    "Sede Oeste",
-    "Sede Pilar",
-    "Sede Nueva 1",
-    "Sede Nueva 2",
-    "Sede nacho",
-];
+export default function Header({
+  selectedSede,
+  setSelectedSede,
+  currentUser,
+  onLogout,
+}) {
+  const [sedes, setSedes] = useState([]);
+  const isAdmin = currentUser?.access === "Todas las sedes";
 
-export default function Header({ selectedSede, setSelectedSede, currentUser, onLogout }) {
-    return (
-        <header className="topbar">
-            <div>
-                <h1>Panel de gestión</h1>
-                <p>Demo operativo con datos simulados</p>
-            </div>
+  useEffect(() => {
+    async function loadSedes() {
+      try {
+        const data = await getSedes();
+        setSedes(data.filter((sede) => sede.estado === "Activa"));
+      } catch (error) {
+        console.error("Error cargando sedes en Header:", error);
+      }
+    }
 
-            <div className="topbar-actions">
-                <div className="search-box">
-                    <Search size={16} />
-                    <input placeholder="Buscar..." />
-                </div>
+    if (isAdmin) {
+      loadSedes();
+    }
+  }, [isAdmin]);
 
-                {currentUser.access === "Todas las sedes" ? (
-                    <select value={selectedSede} onChange={(e) => setSelectedSede(e.target.value)}>
-                        {sedes.map((sede) => (
-                            <option key={sede}>{sede}</option>
-                        ))}
-                    </select>
-                ) : (
-                    <span className="sede-indicator">Vista: {currentUser.sede}</span>
-                )}
+  return (
+    <header className="topbar">
+      <div>
+        <h1>Panel de gestión</h1>
+        <p>Gestión operativa integrada</p>
+      </div>
 
-                <button className="icon-button">
-                    <Bell size={18} />
-                </button>
+      <div className="topbar-actions">
+        <div className="search-box">
+          <Search size={16} />
+          <input placeholder="Buscar..." />
+        </div>
 
-                <button className="secondary-button" onClick={onLogout} title="Cerrar sesión">
-                    <LogOut size={16} />
-                    <span>Salir</span>
-                </button>
-            </div>
-        </header>
-    );
+        {isAdmin ? (
+          <select
+            value={selectedSede}
+            onChange={(e) => setSelectedSede(e.target.value)}
+          >
+            <option value="Todas las sedes">Todas las sedes</option>
+
+            {sedes.map((sede) => (
+              <option key={sede.id} value={sede.nombre}>
+                {sede.nombre}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="sede-indicator">Vista: {currentUser.sede}</span>
+        )}
+
+        <button className="icon-button">
+          <Bell size={18} />
+        </button>
+
+        <button
+          className="secondary-button"
+          onClick={onLogout}
+          title="Cerrar sesión"
+        >
+          <LogOut size={16} />
+          <span>Salir</span>
+        </button>
+      </div>
+    </header>
+  );
 }
