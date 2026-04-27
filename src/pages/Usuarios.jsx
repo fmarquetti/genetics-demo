@@ -98,6 +98,9 @@ export default function Usuarios({ selectedSede }) {
       });
 
       setModal(null);
+    } catch (error) {
+      console.error("Error creando usuario:", error);
+      alert(error.message || "No se pudo crear el usuario.");
     } finally {
       setSaving(false);
     }
