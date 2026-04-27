@@ -1,67 +1,75 @@
+// src/pages/CuentasCorrientes.jsx
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Eye, CheckCircle } from "lucide-react";
+import { Plus, Trash2, Eye, CheckCircle, AlertTriangle } from "lucide-react";
 import Modal from "../components/Modal";
 
+// 1. Datos iniciales con estructura de comprobantes profesionales
 const initialMovimientos = [
     {
         id: 1,
-        fecha: "31/05/2025",
+        fecha: "2025-05-01", 
         entidad: "OSDE",
         tipoEntidad: "Obra social",
         sede: "Sede Centro",
-        concepto: "Facturación mayo 2025",
-        tipo: "Debe",
+        comprobante: "Factura A",
+        numero: "0001-00004562",
+        concepto: "Facturación abril 2025",
         importe: 1250000,
-        vencimiento: "10/06/2025",
+        vencimiento: "2025-05-31",
         estado: "Pendiente",
     },
     {
         id: 2,
-        fecha: "30/05/2025",
-        entidad: "Swiss Medical",
-        tipoEntidad: "Prepaga",
-        sede: "Sede Norte",
-        concepto: "Facturación mayo 2025",
-        tipo: "Debe",
-        importe: 960000,
-        vencimiento: "09/06/2025",
-        estado: "Pendiente",
+        fecha: "2025-05-15",
+        entidad: "OSDE",
+        tipoEntidad: "Obra social",
+        sede: "Sede Centro",
+        comprobante: "Recibo",
+        numero: "0001-00000890",
+        concepto: "Cobro parcial abril",
+        importe: 500000,
+        vencimiento: "",
+        estado: "Aplicado",
     },
     {
         id: 3,
-        fecha: "29/05/2025",
+        fecha: "2025-05-10",
         entidad: "Droguería del Sur",
         tipoEntidad: "Proveedor",
         sede: "Sede Centro",
-        concepto: "Compra de insumos",
-        tipo: "Haber",
+        comprobante: "Factura A",
+        numero: "0014-00089654",
+        concepto: "Insumos laboratorio",
         importe: 320000,
-        vencimiento: "05/06/2025",
+        vencimiento: "2025-05-20", 
         estado: "Pendiente",
     },
     {
         id: 4,
-        fecha: "28/05/2025",
-        entidad: "OSDE",
-        tipoEntidad: "Obra social",
-        sede: "Sede Centro",
-        concepto: "Pago parcial factura abril",
-        tipo: "Haber",
-        importe: 450000,
-        vencimiento: "-",
-        estado: "Aplicado",
+        fecha: "2025-05-30",
+        entidad: "Swiss Medical",
+        tipoEntidad: "Prepaga",
+        sede: "Sede Norte",
+        comprobante: "Factura A",
+        numero: "0001-00004563",
+        concepto: "Facturación mayo",
+        importe: 960000,
+        vencimiento: "2025-06-30",
+        estado: "Pendiente",
     },
 ];
 
 function filterBySede(items, selectedSede) {
     if (!selectedSede || selectedSede === "Todas las sedes") return items;
-
-    return items.filter((item) => {
-        return item.sede === selectedSede || item.sede === "Todas";
-    });
+    return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
 }
 
-const formatMoney = (value) => `$ ${Number(value).toLocaleString("es-AR")}`;
+const formatMoney = (value) => `$ ${Number(value).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+const formatDate = (isoString) => {
+    if (!isoString) return "-";
+    const [year, month, day] = isoString.split("-");
+    return `${day}/${month}/${year}`;
+};
 
 export default function CuentasCorrientes({ selectedSede }) {
     const [movimientos, setMovimientos] = useState(initialMovimientos);
@@ -69,36 +77,53 @@ export default function CuentasCorrientes({ selectedSede }) {
     const [tipoFiltro, setTipoFiltro] = useState("Todos");
     const [modal, setModal] = useState(null);
     const [selectedEntidad, setSelectedEntidad] = useState(null);
+
     const movimientosPorSede = filterBySede(movimientos, selectedSede);
 
     const [form, setForm] = useState({
-        fecha: "",
+        fecha: new Date().toISOString().split("T")[0],
         entidad: "",
         tipoEntidad: "Obra social",
         sede: "Sede Centro",
+        comprobante: "Factura",
+        numero: "",
         concepto: "",
-        tipo: "Debe",
         importe: "",
         vencimiento: "",
         estado: "Pendiente",
     });
 
+    const getImpactoContable = (tipoEntidad, comprobante, importe) => {
+        const esProveedor = tipoEntidad === "Proveedor";
+        const esSumaDeuda = ["Factura", "Factura A", "Factura B", "Factura C", "Nota de Débito"].includes(comprobante);
+        
+        let debe = 0;
+        let haber = 0;
+
+        if (esProveedor) {
+            if (esSumaDeuda) haber = importe;
+            else debe = importe;
+        } else {
+            if (esSumaDeuda) debe = importe;
+            else haber = importe;
+        }
+
+        return { debe, haber };
+    };
+
     const movimientosFiltrados = useMemo(() => {
         return movimientosPorSede.filter((item) => {
             const matchSearch =
                 item.entidad.toLowerCase().includes(search.toLowerCase()) ||
-                item.concepto.toLowerCase().includes(search.toLowerCase()) ||
-                item.sede.toLowerCase().includes(search.toLowerCase());
-
-            const matchTipo =
-                tipoFiltro === "Todos" || item.tipoEntidad === tipoFiltro;
-
+                item.concepto.toLowerCase().includes(search.toLowerCase());
+            const matchTipo = tipoFiltro === "Todos" || item.tipoEntidad === tipoFiltro;
             return matchSearch && matchTipo;
         });
     }, [movimientosPorSede, search, tipoFiltro]);
 
     const resumenPorEntidad = useMemo(() => {
         const resumen = {};
+        const hoy = new Date().toISOString().split("T")[0];
 
         movimientosPorSede.forEach((mov) => {
             if (!resumen[mov.entidad]) {
@@ -106,150 +131,110 @@ export default function CuentasCorrientes({ selectedSede }) {
                     entidad: mov.entidad,
                     tipoEntidad: mov.tipoEntidad,
                     sede: mov.sede,
-                    debe: 0,
-                    haber: 0,
-                    pendientes: 0,
+                    saldoTotal: 0,
+                    deudaVencida: 0,
                 };
             }
 
-            if (mov.tipo === "Debe") resumen[mov.entidad].debe += mov.importe;
-            if (mov.tipo === "Haber") resumen[mov.entidad].haber += mov.importe;
-            if (mov.estado === "Pendiente") resumen[mov.entidad].pendientes += 1;
+            const { debe, haber } = getImpactoContable(mov.tipoEntidad, mov.comprobante, mov.importe);
+            
+            let impactoSaldo = mov.tipoEntidad === "Proveedor" ? (haber - debe) : (debe - haber);
+            resumen[mov.entidad].saldoTotal += impactoSaldo;
+
+            if (mov.estado === "Pendiente" && mov.vencimiento && mov.vencimiento < hoy) {
+                resumen[mov.entidad].deudaVencida += impactoSaldo;
+            }
         });
 
-        return Object.values(resumen).map((item) => ({
-            ...item,
-            saldo: item.debe - item.haber,
-        }));
+        return Object.values(resumen);
     }, [movimientosPorSede]);
 
-    const totalDebe = movimientosPorSede
-        .filter((m) => m.tipo === "Debe")
-        .reduce((acc, m) => acc + m.importe, 0);
+    const totalCuentasACobrar = resumenPorEntidad
+        .filter((item) => item.tipoEntidad !== "Proveedor")
+        .reduce((acc, item) => acc + Math.max(0, item.saldoTotal), 0);
 
-    const totalHaber = movimientosPorSede
-        .filter((m) => m.tipo === "Haber")
-        .reduce((acc, m) => acc + m.importe, 0);
+    const totalCuentasAPagar = resumenPorEntidad
+        .filter((item) => item.tipoEntidad === "Proveedor")
+        .reduce((acc, item) => acc + Math.max(0, item.saldoTotal), 0);
 
-    const totalPendiente = movimientosPorSede.filter(
-        (m) => m.estado === "Pendiente"
-    ).length;
+    const deudaTotalVencida = resumenPorEntidad.reduce((acc, item) => acc + item.deudaVencida, 0);
+
+    const detalleLibroMayor = useMemo(() => {
+        if (!selectedEntidad) return [];
+        
+        const movimientosEntidad = movimientos
+            .filter((m) => m.entidad === selectedEntidad)
+            .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+
+        let saldoAcumulado = 0;
+
+        return movimientosEntidad.map((mov) => {
+            const { debe, haber } = getImpactoContable(mov.tipoEntidad, mov.comprobante, mov.importe);
+            const impacto = mov.tipoEntidad === "Proveedor" ? (haber - debe) : (debe - haber);
+            saldoAcumulado += impacto;
+
+            return {
+                ...mov,
+                debe,
+                haber,
+                saldoAcumulado
+            };
+        });
+    }, [movimientos, selectedEntidad]);
 
     function handleCreate(e) {
         e.preventDefault();
-
         setMovimientos((prev) => [
             {
                 id: Date.now(),
                 ...form,
                 importe: Number(form.importe),
-                vencimiento: form.vencimiento || "-",
             },
             ...prev,
         ]);
-
-        setForm({
-            fecha: "",
-            entidad: "",
-            tipoEntidad: "Obra social",
-            sede: "Sede Centro",
-            concepto: "",
-            tipo: "Debe",
-            importe: "",
-            vencimiento: "",
-            estado: "Pendiente",
-        });
-
         setModal(null);
     }
-
-    function handleDelete(id) {
-        setMovimientos((prev) => prev.filter((item) => item.id !== id));
-    }
-
-    function marcarAplicado(id) {
-        setMovimientos((prev) =>
-            prev.map((item) =>
-                item.id === id ? { ...item, estado: "Aplicado" } : item
-            )
-        );
-    }
-
-    function abrirDetalle(entidad) {
-        setSelectedEntidad(entidad);
-        setModal("detalle");
-    }
-
-    const detalleEntidad = movimientos.filter(
-        (item) => item.entidad === selectedEntidad
-    );
 
     return (
         <section className="page">
             <div className="page-header">
                 <div>
                     <h2>Cuentas corrientes</h2>
-                    <p>Control de saldos por obra social, prepaga, proveedor o entidad.</p>
+                    <p>Gestión avanzada de saldos y libro mayor por entidad.</p>
                 </div>
-
                 <button className="primary-button" onClick={() => setModal("nuevo")}>
-                    <Plus size={16} /> Nuevo movimiento
+                    <Plus size={16} /> Registrar Comprobante
                 </button>
             </div>
 
             <div className="stats-grid small">
                 <div className="stat-card">
                     <div>
-                        <span>Total facturado / debe</span>
-                        <strong>{formatMoney(totalDebe)}</strong>
-                        <small>Importes a cobrar o registrar</small>
+                        <span>A Cobrar (Obras Sociales/Pacientes)</span>
+                        <strong>{formatMoney(totalCuentasACobrar)}</strong>
+                        <small>Activo exigible</small>
                     </div>
                 </div>
-
                 <div className="stat-card">
                     <div>
-                        <span>Total aplicado / haber</span>
-                        <strong>{formatMoney(totalHaber)}</strong>
-                        <small>Cobros, pagos o compensaciones</small>
+                        <span>A Pagar (Proveedores)</span>
+                        <strong>{formatMoney(totalCuentasAPagar)}</strong>
+                        <small>Pasivo exigible</small>
                     </div>
                 </div>
-
                 <div className="stat-card">
                     <div>
-                        <span>Saldo neto</span>
-                        <strong>{formatMoney(totalDebe - totalHaber)}</strong>
-                        <small>Resultado simulado</small>
+                        <span>Riesgo / Deuda Vencida Global</span>
+                        <strong style={{ color: deudaTotalVencida > 0 ? "#ef4444" : "inherit" }}>
+                            {formatMoney(deudaTotalVencida)}
+                        </strong>
+                        <small>Comprobantes fuera de término</small>
                     </div>
                 </div>
-
-                <div className="stat-card">
-                    <div>
-                        <span>Movimientos pendientes</span>
-                        <strong>{totalPendiente}</strong>
-                        <small>Requieren seguimiento</small>
-                    </div>
-                </div>
-            </div>
-
-            <div className="filters-bar">
-                <input
-                    placeholder="Buscar por entidad, concepto o sede..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                />
-
-                <select value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>
-                    <option>Todos</option>
-                    <option>Obra social</option>
-                    <option>Prepaga</option>
-                    <option>Proveedor</option>
-                    <option>Particular</option>
-                </select>
             </div>
 
             <div className="panel">
-                <h3>Resumen por entidad</h3>
-
+                <h3>Resumen de Saldos por Entidad</h3>
                 <div className="table-card">
                     <table>
                         <thead>
@@ -257,220 +242,135 @@ export default function CuentasCorrientes({ selectedSede }) {
                                 <th>Entidad</th>
                                 <th>Tipo</th>
                                 <th>Sede</th>
-                                <th>Debe</th>
-                                <th>Haber</th>
-                                <th>Saldo</th>
-                                <th>Pendientes</th>
-                                <th>Acciones</th>
+                                <th>Saldo Total</th>
+                                <th>Deuda Vencida</th>
+                                <th>Libro Mayor</th>
                             </tr>
                         </thead>
-
                         <tbody>
                             {resumenPorEntidad.map((item) => (
                                 <tr key={item.entidad}>
-                                    <td>{item.entidad}</td>
+                                    <td><strong>{item.entidad}</strong></td>
                                     <td>{item.tipoEntidad}</td>
                                     <td>{item.sede}</td>
-                                    <td>{formatMoney(item.debe)}</td>
-                                    <td>{formatMoney(item.haber)}</td>
                                     <td>
-                                        <strong>{formatMoney(item.saldo)}</strong>
+                                        <strong style={{ color: item.tipoEntidad === "Proveedor" && item.saldoTotal > 0 ? "#ef4444" : "#10b981" }}>
+                                            {formatMoney(item.saldoTotal)}
+                                        </strong>
                                     </td>
-                                    <td>{item.pendientes}</td>
                                     <td>
-                                        <div className="table-actions">
-                                            <button onClick={() => abrirDetalle(item.entidad)}>
-                                                <Eye size={16} />
-                                            </button>
-                                        </div>
+                                        {item.deudaVencida > 0 ? (
+                                            <span style={{ color: "#ef4444", display: "flex", alignItems: "center", gap: "4px" }}>
+                                                <AlertTriangle size={14} /> {formatMoney(item.deudaVencida)}
+                                            </span>
+                                        ) : (
+                                            <span style={{ color: "#6b7280" }}>Al día</span>
+                                        )}
+                                    </td>
+                                    <td>
+                                        <button className="secondary-button" style={{ padding: "4px 8px", fontSize: "12px" }} onClick={() => { setSelectedEntidad(item.entidad); setModal("mayor"); }}>
+                                            <Eye size={14} style={{ marginRight: 4 }} /> Ver Mayor
+                                        </button>
                                     </td>
                                 </tr>
                             ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div className="panel" style={{ marginTop: 18 }}>
-                <h3>Movimientos</h3>
-
-                <div className="table-card">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Fecha</th>
-                                <th>Entidad</th>
-                                <th>Tipo entidad</th>
-                                <th>Sede</th>
-                                <th>Concepto</th>
-                                <th>Movimiento</th>
-                                <th>Importe</th>
-                                <th>Vencimiento</th>
-                                <th>Estado</th>
-                                <th>Acciones</th>
-                            </tr>
-                        </thead>
-
-                        <tbody>
-                            {movimientosFiltrados.map((item) => (
-                                <tr key={item.id}>
-                                    <td>{item.fecha}</td>
-                                    <td>{item.entidad}</td>
-                                    <td>{item.tipoEntidad}</td>
-                                    <td>{item.sede}</td>
-                                    <td>{item.concepto}</td>
-                                    <td>{item.tipo}</td>
-                                    <td>{formatMoney(item.importe)}</td>
-                                    <td>{item.vencimiento}</td>
-                                    <td>
-                                        <span className={`status-badge ${item.estado.toLowerCase()}`}>
-                                            {item.estado}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div className="table-actions">
-                                            {item.estado === "Pendiente" && (
-                                                <button onClick={() => marcarAplicado(item.id)}>
-                                                    <CheckCircle size={16} />
-                                                </button>
-                                            )}
-
-                                            <button onClick={() => handleDelete(item.id)}>
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-
-                            {movimientosFiltrados.length === 0 && (
-                                <tr>
-                                    <td colSpan="10">No se encontraron movimientos.</td>
-                                </tr>
-                            )}
                         </tbody>
                     </table>
                 </div>
             </div>
 
             {modal === "nuevo" && (
-                <Modal title="Nuevo movimiento de cuenta corriente" onClose={() => setModal(null)}>
+                <Modal title="Registrar nuevo comprobante" onClose={() => setModal(null)}>
                     <form className="form-grid" onSubmit={handleCreate}>
                         <label>
-                            Fecha
-                            <input
-                                type="date"
-                                required
-                                value={form.fecha}
-                                onChange={(e) => setForm({ ...form, fecha: e.target.value })}
-                            />
+                            Fecha de emisión
+                            <input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} />
                         </label>
-
                         <label>
                             Entidad
-                            <input
-                                required
-                                placeholder="Ej: OSDE, proveedor, paciente..."
-                                value={form.entidad}
-                                onChange={(e) => setForm({ ...form, entidad: e.target.value })}
-                            />
+                            <input required placeholder="Ej: OSDE, Edenor..." value={form.entidad} onChange={(e) => setForm({ ...form, entidad: e.target.value })} />
                         </label>
-
                         <label>
-                            Tipo de entidad
-                            <select
-                                value={form.tipoEntidad}
-                                onChange={(e) => setForm({ ...form, tipoEntidad: e.target.value })}
-                            >
+                            Clasificación
+                            <select value={form.tipoEntidad} onChange={(e) => setForm({ ...form, tipoEntidad: e.target.value })}>
                                 <option>Obra social</option>
                                 <option>Prepaga</option>
                                 <option>Proveedor</option>
                                 <option>Particular</option>
                             </select>
                         </label>
-
                         <label>
-                            Sede
-                            <select value={form.sede} onChange={(e) => setForm({ ...form, sede: e.target.value })}>
-                                <option>Sede Centro</option>
-                                <option>Sede Norte</option>
-                                <option>Sede Sur</option>
-                                <option>Sede Oeste</option>
-                                <option>Sede Pilar</option>
+                            Tipo de Comprobante
+                            <select value={form.comprobante} onChange={(e) => setForm({ ...form, comprobante: e.target.value })}>
+                                <option>Factura A</option>
+                                <option>Factura B</option>
+                                <option>Factura C</option>
+                                <option>Recibo</option>
+                                <option>Nota de Crédito</option>
+                                <option>Nota de Débito</option>
                             </select>
                         </label>
-
                         <label>
-                            Movimiento
-                            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-                                <option>Debe</option>
-                                <option>Haber</option>
-                            </select>
+                            Número de Comprobante
+                            <input placeholder="Ej: 0001-00004562" value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} />
                         </label>
-
                         <label>
-                            Importe
-                            <input
-                                type="number"
-                                required
-                                value={form.importe}
-                                onChange={(e) => setForm({ ...form, importe: e.target.value })}
-                            />
+                            Importe Total
+                            <input type="number" step="0.01" required value={form.importe} onChange={(e) => setForm({ ...form, importe: e.target.value })} />
                         </label>
-
                         <label>
-                            Vencimiento
-                            <input
-                                type="date"
-                                value={form.vencimiento}
-                                onChange={(e) => setForm({ ...form, vencimiento: e.target.value })}
-                            />
+                            Fecha de Vencimiento
+                            <input type="date" value={form.vencimiento} onChange={(e) => setForm({ ...form, vencimiento: e.target.value })} />
                         </label>
-
                         <label className="full">
-                            Concepto
-                            <input
-                                required
-                                value={form.concepto}
-                                onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-                            />
+                            Concepto / Detalle
+                            <input required value={form.concepto} onChange={(e) => setForm({ ...form, concepto: e.target.value })} />
                         </label>
-
-                        <div className="modal-actions">
-                            <button type="button" className="secondary-button" onClick={() => setModal(null)}>
-                                Cancelar
-                            </button>
-
-                            <button type="submit" className="primary-button">
-                                Guardar movimiento
-                            </button>
+                        <div className="modal-actions" style={{ gridColumn: "1 / -1" }}>
+                            <button type="button" className="secondary-button" onClick={() => setModal(null)}>Cancelar</button>
+                            <button type="submit" className="primary-button">Registrar en Cuenta</button>
                         </div>
                     </form>
                 </Modal>
             )}
 
-            {modal === "detalle" && (
-                <Modal title={`Detalle de ${selectedEntidad}`} onClose={() => setModal(null)}>
-                    <div className="table-card">
-                        <table>
-                            <thead>
+            {/* Modal del Libro Mayor (Con ancho ajustado y scroll) */}
+            {modal === "mayor" && (
+                <Modal title={`Libro Mayor: ${selectedEntidad}`} onClose={() => setModal(null)}>
+                    <div className="table-card" style={{ overflowX: "auto", margin: "0 -10px", padding: "0 10px" }}>
+                        <table style={{ minWidth: "750px", width: "100%" }}>
+                            <thead style={{ backgroundColor: "#f3f4f6" }}>
                                 <tr>
                                     <th>Fecha</th>
+                                    <th>Comprobante</th>
                                     <th>Concepto</th>
-                                    <th>Tipo</th>
-                                    <th>Importe</th>
-                                    <th>Estado</th>
+                                    <th>Vencimiento</th>
+                                    <th style={{ textAlign: "right" }}>Debe</th>
+                                    <th style={{ textAlign: "right" }}>Haber</th>
+                                    <th style={{ textAlign: "right", borderLeft: "2px solid #e5e7eb" }}>Saldo Acum.</th>
                                 </tr>
                             </thead>
-
                             <tbody>
-                                {detalleEntidad.map((item) => (
-                                    <tr key={item.id}>
-                                        <td>{item.fecha}</td>
+                                {detalleLibroMayor.map((item, index) => (
+                                    <tr key={index}>
+                                        <td style={{ whiteSpace: "nowrap" }}>{formatDate(item.fecha)}</td>
+                                        <td style={{ whiteSpace: "nowrap" }}>
+                                            <strong>{item.comprobante}</strong>
+                                            <br /><small style={{ color: "#6b7280" }}>{item.numero}</small>
+                                        </td>
                                         <td>{item.concepto}</td>
-                                        <td>{item.tipo}</td>
-                                        <td>{formatMoney(item.importe)}</td>
-                                        <td>{item.estado}</td>
+                                        <td style={{ whiteSpace: "nowrap" }}>
+                                            {item.estado === "Pendiente" && item.vencimiento < new Date().toISOString().split("T")[0] ? (
+                                                <span style={{ color: "#ef4444", fontWeight: "bold" }}>{formatDate(item.vencimiento)} (Vencido)</span>
+                                            ) : (
+                                                formatDate(item.vencimiento)
+                                            )}
+                                        </td>
+                                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{item.debe > 0 ? formatMoney(item.debe) : "-"}</td>
+                                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{item.haber > 0 ? formatMoney(item.haber) : "-"}</td>
+                                        <td style={{ textAlign: "right", borderLeft: "2px solid #e5e7eb", fontWeight: "bold", whiteSpace: "nowrap" }}>
+                                            {formatMoney(item.saldoAcumulado)}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
