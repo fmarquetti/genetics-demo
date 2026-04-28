@@ -12,11 +12,9 @@ import {
   marcarCuentaAplicada,
 } from "../services/cuentaCorrienteService";
 
-// --- CONSTANTES Y UTILS (Mejora Senior aplicada) ---
-// 1. Lista para que la matemática sepa qué suma deuda ("Factura" a secas queda por si hay datos viejos)
+// --- CONSTANTES Y UTILS ---
 const COMPROBANTES_DEUDA = ["Factura", "Factura A", "Factura B", "Factura C", "Nota de Débito"];
 
-// 2. Lista maestra para mostrar en el menú desplegable del formulario
 const OPCIONES_COMPROBANTE = [
   "Factura A", 
   "Factura B", 
@@ -113,6 +111,7 @@ export default function CuentasCorrientes({ selectedSede }) {
     return [...new Set(movimientosPorSede.map((m) => m.entidad))];
   }, [movimientosPorSede]);
 
+  // Filtro para el Historial Inferior
   const movimientosFiltrados = useMemo(() => {
     return movimientosPorSede.filter((item) => {
       const matchSearch =
@@ -124,6 +123,7 @@ export default function CuentasCorrientes({ selectedSede }) {
     });
   }, [movimientosPorSede, search, tipoFiltro]);
 
+  // Resumen Base (Cálculo de Matemática y Mora con BUG FIX Senior)
   const resumenPorEntidad = useMemo(() => {
     const resumen = {};
     const hoy = new Date();
@@ -142,11 +142,25 @@ export default function CuentasCorrientes({ selectedSede }) {
       if (mov.estado === "Pendiente" && mov.vencimiento) {
         const fechaVence = new Date(mov.vencimiento);
         fechaVence.setHours(0, 0, 0, 0);
-        if (fechaVence < hoy) resumen[key].deudaVencida += impactoSaldo;
+        // FIX: Solo suma a deuda vencida si el impacto es mayor a 0 (deuda real, no notas de crédito a favor)
+        if (fechaVence < hoy && impactoSaldo > 0) {
+          resumen[key].deudaVencida += impactoSaldo;
+        }
       }
     });
     return Object.values(resumen);
   }, [movimientosPorSede]);
+
+  // FIX: Resumen Filtrado (Conecta la barra de búsqueda con la tabla superior)
+  const resumenFiltrado = useMemo(() => {
+    if (!search && tipoFiltro === "Todos") return resumenPorEntidad;
+    return resumenPorEntidad.filter(item => {
+      const matchSearch = item.entidad.toLowerCase().includes(search.toLowerCase()) || 
+                          item.sede.toLowerCase().includes(search.toLowerCase());
+      const matchTipo = tipoFiltro === "Todos" || item.tipoEntidad === tipoFiltro;
+      return matchSearch && matchTipo;
+    });
+  }, [resumenPorEntidad, search, tipoFiltro]);
 
   const totalCuentasACobrar = resumenPorEntidad.filter(i => i.tipoEntidad !== "Proveedor").reduce((a, b) => a + Math.max(0, b.saldoTotal), 0);
   const totalCuentasAPagar = resumenPorEntidad.filter(i => i.tipoEntidad === "Proveedor").reduce((a, b) => a + Math.max(0, b.saldoTotal), 0);
@@ -173,7 +187,8 @@ export default function CuentasCorrientes({ selectedSede }) {
     detalleLibroMayor.forEach(m => {
       csvContent += `${formatDate(m.fecha)};${m.comprobante} ${m.numero || ''};${m.concepto};${formatDate(m.vencimiento)};${m.debe};${m.haber};${m.saldoAcumulado}\n`;
     });
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    // FIX: Agregamos el BOM (\uFEFF) para que Excel lea las tildes y eñes correctamente
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.setAttribute("download", `Mayor_${selectedEntidad.replace(/ /g, "_")}.csv`);
@@ -275,7 +290,8 @@ export default function CuentasCorrientes({ selectedSede }) {
             </thead>
             <tbody>
               {loading && <tr><td colSpan="6">Cargando cuentas corrientes...</td></tr>}
-              {!loading && resumenPorEntidad.map((item) => (
+              {/* FIX: Ahora mapeamos resumenFiltrado en lugar de resumenPorEntidad */}
+              {!loading && resumenFiltrado.map((item) => (
                 <tr key={`${item.entidad}-${item.tipoEntidad}-${item.sede}`}>
                   <td><strong>{item.entidad}</strong></td>
                   <td>{item.tipoEntidad}</td>
@@ -299,7 +315,7 @@ export default function CuentasCorrientes({ selectedSede }) {
                   </td>
                 </tr>
               ))}
-              {!loading && resumenPorEntidad.length === 0 && <tr><td colSpan="6">No hay movimientos.</td></tr>}
+              {!loading && resumenFiltrado.length === 0 && <tr><td colSpan="6">No se encontraron entidades para esta búsqueda.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -356,8 +372,6 @@ export default function CuentasCorrientes({ selectedSede }) {
             <label>Sede <select value={form.sedeId} onChange={(e) => setForm({ ...form, sedeId: e.target.value })} required>
               {sedes.map((sede) => <option key={sede.id} value={sede.id}>{sede.nombre}</option>)}
             </select></label>
-            
-            {/* ACÁ ESTÁ EL MENÚ DESPLEGABLE LEYENDO DE LA LISTA MAESTRA */}
             <label>Tipo de Comprobante 
               <select value={form.comprobante} onChange={(e) => setForm({ ...form, comprobante: e.target.value })}>
                 {OPCIONES_COMPROBANTE.map((opcion) => (
@@ -365,7 +379,6 @@ export default function CuentasCorrientes({ selectedSede }) {
                 ))}
               </select>
             </label>
-
             <label>Número de Comprobante <input placeholder="Ej: 0001-00004562" value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} /></label>
             <label>Importe Total <input type="number" step="0.01" required value={form.importe} onChange={(e) => setForm({ ...form, importe: e.target.value })} /></label>
             <label>Fecha de Vencimiento <input type="date" value={form.vencimiento} onChange={(e) => setForm({ ...form, vencimiento: e.target.value })} /></label>
