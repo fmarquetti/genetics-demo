@@ -3,6 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Eye, CheckCircle, AlertTriangle, Download } from "lucide-react";
 import Modal from "../components/Modal";
 
+// --- NUEVAS LIBRERÍAS PARA EXCEL PROFESIONAL ---
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+
 // --- SERVICIOS ---
 import { getSedes } from "../services/sedeService";
 import {
@@ -123,7 +127,7 @@ export default function CuentasCorrientes({ selectedSede }) {
     });
   }, [movimientosPorSede, search, tipoFiltro]);
 
-  // Resumen Base (Cálculo de Matemática y Mora con BUG FIX Senior)
+  // Resumen Base 
   const resumenPorEntidad = useMemo(() => {
     const resumen = {};
     const hoy = new Date();
@@ -142,7 +146,6 @@ export default function CuentasCorrientes({ selectedSede }) {
       if (mov.estado === "Pendiente" && mov.vencimiento) {
         const fechaVence = new Date(mov.vencimiento);
         fechaVence.setHours(0, 0, 0, 0);
-        // FIX: Solo suma a deuda vencida si el impacto es mayor a 0 (deuda real, no notas de crédito a favor)
         if (fechaVence < hoy && impactoSaldo > 0) {
           resumen[key].deudaVencida += impactoSaldo;
         }
@@ -151,7 +154,7 @@ export default function CuentasCorrientes({ selectedSede }) {
     return Object.values(resumen);
   }, [movimientosPorSede]);
 
-  // FIX: Resumen Filtrado (Conecta la barra de búsqueda con la tabla superior)
+  // Resumen Filtrado 
   const resumenFiltrado = useMemo(() => {
     if (!search && tipoFiltro === "Todos") return resumenPorEntidad;
     return resumenPorEntidad.filter(item => {
@@ -180,21 +183,60 @@ export default function CuentasCorrientes({ selectedSede }) {
     });
   }, [movimientosPorSede, selectedEntidad]);
 
-  // --- ACCIONES ---
-  const exportarMayorExcel = () => {
+  // --- EXPORTAR EXCEL PROFESIONAL (ESTÉTICO) ---
+  const exportarMayorExcel = async () => {
     if (!selectedEntidad) return;
-    let csvContent = "Fecha;Comprobante;Concepto;Vencimiento;Debe;Haber;Saldo Acumulado\n";
-    detalleLibroMayor.forEach(m => {
-      csvContent += `${formatDate(m.fecha)};${m.comprobante} ${m.numero || ''};${m.concepto};${formatDate(m.vencimiento)};${m.debe};${m.haber};${m.saldoAcumulado}\n`;
+
+    // 1. Creamos el libro de trabajo (workbook)
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(`Mayor - ${selectedEntidad}`);
+
+    // 2. Definimos las columnas con sus anchos exactos
+    worksheet.columns = [
+      { header: "Fecha", key: "fecha", width: 15 },
+      { header: "Comprobante", key: "comprobante", width: 25 },
+      { header: "Concepto / Detalle", key: "concepto", width: 45 },
+      { header: "Vencimiento", key: "vencimiento", width: 15 },
+      { header: "Debe", key: "debe", width: 20 },
+      { header: "Haber", key: "haber", width: 20 },
+      { header: "Saldo Acumulado", key: "saldo", width: 20 },
+    ];
+
+    // 3. Le damos estilo a la fila del encabezado (Fondo azul oscuro, letras blancas y en negrita)
+    worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    worksheet.getRow(1).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1E3A8A" }, // Un azul corporativo elegante
+    };
+    worksheet.getRow(1).alignment = { vertical: "middle", horizontal: "center" };
+
+    // 4. Llenamos la tabla con los datos
+    detalleLibroMayor.forEach((m) => {
+      const row = worksheet.addRow({
+        fecha: formatDate(m.fecha),
+        comprobante: `${m.comprobante} ${m.numero || ""}`,
+        concepto: m.concepto,
+        vencimiento: formatDate(m.vencimiento),
+        debe: m.debe > 0 ? m.debe : "",
+        haber: m.haber > 0 ? m.haber : "",
+        saldo: m.saldoAcumulado,
+      });
+
+      // 5. Formato de número "Contabilidad": Para que se vean como plata y Excel deje sumarlos
+      row.getCell("debe").numFmt = '"$"#,##0.00';
+      row.getCell("haber").numFmt = '"$"#,##0.00';
+      
+      // El saldo acumulado lo ponemos siempre en negrita
+      const celdaSaldo = row.getCell("saldo");
+      celdaSaldo.numFmt = '"$"#,##0.00';
+      celdaSaldo.font = { bold: true };
     });
-    // FIX: Agregamos el BOM (\uFEFF) para que Excel lea las tildes y eñes correctamente
-    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `Mayor_${selectedEntidad.replace(/ /g, "_")}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    // 6. Generamos y descargamos el archivo final (.xlsx)
+    const buffer = await workbook.xlsx.writeBuffer();
+    const data = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    saveAs(data, `Libro_Mayor_${selectedEntidad.replace(/ /g, "_")}.xlsx`);
   };
 
   async function handleCreate(e) {
@@ -290,7 +332,6 @@ export default function CuentasCorrientes({ selectedSede }) {
             </thead>
             <tbody>
               {loading && <tr><td colSpan="6">Cargando cuentas corrientes...</td></tr>}
-              {/* FIX: Ahora mapeamos resumenFiltrado en lugar de resumenPorEntidad */}
               {!loading && resumenFiltrado.map((item) => (
                 <tr key={`${item.entidad}-${item.tipoEntidad}-${item.sede}`}>
                   <td><strong>{item.entidad}</strong></td>
