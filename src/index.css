@@ -1830,23 +1830,23 @@ td {
   margin-bottom: 18px;
 }
 
-.filters-bar > input,
-.filters-bar > select,
-.filters-bar > button {
+.filters-bar>input,
+.filters-bar>select,
+.filters-bar>button {
   height: 36px;
   min-height: 36px;
 }
 
-.filters-bar > input:first-child {
+.filters-bar>input:first-child {
   flex: 1 1 280px;
   min-width: 260px;
 }
 
-.filters-bar > select {
+.filters-bar>select {
   flex: 0 0 150px;
 }
 
-.filters-bar > input[type="date"] {
+.filters-bar>input[type="date"] {
   flex: 0 0 140px;
 }
 
@@ -1909,6 +1909,48 @@ td {
   overflow-x: hidden;
 }
 
+/* =========================================================
+   DASHBOARD LOADER
+   ========================================================= */
+
+.dashboard-loader {
+  min-height: calc(100vh - 180px);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.dashboard-loader-icon {
+  color: var(--primary);
+  animation: dashboardSpin 0.9s linear infinite;
+}
+
+.dashboard-loader h3 {
+  margin: 6px 0 0;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.dashboard-loader p {
+  margin: 0;
+  max-width: 460px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+@keyframes dashboardSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Desktop medio */
 @media (max-width: 1200px) {
   .filters-bar {
@@ -1916,7 +1958,7 @@ td {
     flex-wrap: wrap;
   }
 
-  .filters-bar > input:first-child {
+  .filters-bar>input:first-child {
     flex: 1 1 100%;
     min-width: 0;
   }
@@ -1934,14 +1976,14 @@ td {
     gap: 8px;
   }
 
-  .filters-bar > input:first-child {
+  .filters-bar>input:first-child {
     grid-column: 1 / -1;
     min-width: 0;
   }
 
-  .filters-bar > input,
-  .filters-bar > select,
-  .filters-bar > button,
+  .filters-bar>input,
+  .filters-bar>select,
+  .filters-bar>button,
   .filter-field {
     width: 100%;
     max-width: none;

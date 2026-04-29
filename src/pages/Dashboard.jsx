@@ -7,6 +7,7 @@ import {
   RefreshCw,
   TrendingUp,
   Wallet,
+  Loader2,
 } from "lucide-react";
 import {
   Bar,
@@ -347,11 +348,10 @@ export default function Dashboard({ selectedSede }) {
   if (loading) {
     return (
       <section className="page">
-        <div className="page-header">
-          <div>
-            <h2>Dashboard principal</h2>
-            <p>Cargando información financiera...</p>
-          </div>
+        <div className="dashboard-loader">
+          <Loader2 className="dashboard-loader-icon" size={46} />
+          <h3>Cargando dashboard financiero</h3>
+          <p>Estamos consultando la información de ingresos, egresos, bancos y cuentas corrientes.</p>
         </div>
       </section>
     );
