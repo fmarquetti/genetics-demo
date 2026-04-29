@@ -1,10 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
-import { Upload, GitCompare, Plus, Trash2, CheckCircle } from "lucide-react";
+import {
+  Upload,
+  GitCompare,
+  Plus,
+  Trash2,
+  RefreshCw,
+  FileText,
+  FileSpreadsheet,
+  Link2,
+  Unlink,
+} from "lucide-react";
+
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 import Modal from "../components/Modal";
 import { getSedes } from "../services/sedeService";
+import { getIngresos } from "../services/ingresoService";
+import { getEgresos } from "../services/egresoService";
+
 import {
-  conciliarMovimientoBancario,
-  conciliarMovimientosPendientes,
+  conciliarMovimientoConEgreso,
+  conciliarMovimientoConIngreso,
+  desconciliarMovimientoBancario,
   createMovimientoBancario,
   deleteMovimientoBancario,
   getMovimientosBancarios,
@@ -15,15 +35,8 @@ import {
   getCuentasBancarias,
 } from "../services/cuentaBancariaService";
 
-function filterBySede(items, selectedSede) {
-  if (!selectedSede || selectedSede === "Todas las sedes") return items;
-  return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
-}
-
-const formatMoney = (value) => `$ ${Number(value).toLocaleString("es-AR")}`;
-
 const emptyForm = {
-  fecha: "",
+  fecha: new Date().toISOString().split("T")[0],
   sedeId: "",
   cuenta: "",
   tipo: "Ingreso",
@@ -33,40 +46,111 @@ const emptyForm = {
   estado: "Pendiente",
 };
 
+const emptyCuentaForm = {
+  nombre: "",
+  tipo: "Banco",
+  sedeId: "",
+};
+
+function filterBySede(items, selectedSede) {
+  if (!selectedSede || selectedSede === "Todas las sedes") return items;
+  return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
+}
+
+const formatMoney = (value = 0) =>
+  `$ ${Number(value || 0).toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const formatDate = (fecha) => {
+  if (!fecha) return "-";
+  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
+  if (clean.includes("/")) return clean;
+  const [year, month, day] = clean.split("-");
+  if (!year || !month || !day) return clean;
+  return `${day}/${month}/${year}`;
+};
+
+const toDate = (fecha) => {
+  if (!fecha) return null;
+  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
+  if (clean.includes("/")) {
+    const [day, month, year] = clean.split("/");
+    return new Date(`${year}-${month}-${day}T00:00:00`);
+  }
+  return new Date(`${clean}T00:00:00`);
+};
+
+const getFechaReal = (item) => item.fechaDb || item.fecha;
+
+const safeFileName = (text) =>
+  String(text || "reporte")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9-_]/g, "_")
+    .replace(/_+/g, "_");
+
+const getSignedAmount = (mov) =>
+  mov.tipo === "Egreso" ? -Number(mov.importe || 0) : Number(mov.importe || 0);
+
+const diferenciaImporte = (movimiento, comprobante) =>
+  Math.abs(Number(movimiento?.importe || 0) - Number(comprobante?.importe || 0));
+
+const diferenciaDias = (fechaA, fechaB) => {
+  const a = toDate(fechaA);
+  const b = toDate(fechaB);
+  if (!a || !b) return 9999;
+  return Math.abs(Math.round((a - b) / (1000 * 60 * 60 * 24)));
+};
+
 export default function Bancos({ selectedSede }) {
   const [movimientos, setMovimientos] = useState([]);
   const [sedes, setSedes] = useState([]);
+  const [cuentas, setCuentas] = useState([]);
+  const [ingresos, setIngresos] = useState([]);
+  const [egresos, setEgresos] = useState([]);
+
   const [search, setSearch] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("Todos");
+  const [tipoFiltro, setTipoFiltro] = useState("Todos");
+  const [cuentaFiltro, setCuentaFiltro] = useState("Todas");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [cuentaForm, setCuentaForm] = useState(emptyCuentaForm);
+  const [movimientoAConciliar, setMovimientoAConciliar] = useState(null);
+  const [comprobanteSeleccionadoId, setComprobanteSeleccionadoId] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const [cuentas, setCuentas] = useState([]);
-  const [cuentaForm, setCuentaForm] = useState({
-    nombre: "",
-    tipo: "Banco",
-    sedeId: "",
-  });
+  const [deletingId, setDeletingId] = useState(null);
 
   async function loadData() {
     setLoading(true);
 
     try {
-      const [movimientosData, sedesData, cuentasData] = await Promise.all([
-        getMovimientosBancarios(),
-        getSedes(),
-        getCuentasBancarias(),
-      ]);
+      const [movimientosData, sedesData, cuentasData, ingresosData, egresosData] =
+        await Promise.all([
+          getMovimientosBancarios(),
+          getSedes(),
+          getCuentasBancarias(),
+          getIngresos(),
+          getEgresos(),
+        ]);
 
-      setMovimientos(movimientosData);
-      setSedes(sedesData);
-      setCuentas(cuentasData);
+      setMovimientos(movimientosData || []);
+      setSedes(sedesData || []);
+      setCuentas(cuentasData || []);
+      setIngresos(ingresosData || []);
+      setEgresos(egresosData || []);
 
       setForm((prev) => ({
         ...prev,
-        sedeId: prev.sedeId || sedesData[0]?.id || "",
+        sedeId: prev.sedeId || sedesData?.[0]?.id || "",
+        cuenta: prev.cuenta || cuentasData?.[0]?.nombre || "",
       }));
     } catch (error) {
       console.error("Error cargando bancos:", error);
@@ -80,35 +164,198 @@ export default function Bancos({ selectedSede }) {
     loadData();
   }, []);
 
-  const movimientosPorSede = filterBySede(movimientos, selectedSede);
+  const cuentasPorSede = useMemo(() => {
+    return filterBySede(cuentas, selectedSede).filter((cuenta) => cuenta.activa);
+  }, [cuentas, selectedSede]);
+
+  const movimientosPorSede = useMemo(
+    () => filterBySede(movimientos, selectedSede),
+    [movimientos, selectedSede]
+  );
 
   const movimientosFiltrados = useMemo(() => {
+    const searchValue = search.toLowerCase().trim();
+    const fechaDesde = toDate(desde);
+    const fechaHasta = toDate(hasta);
+
     return movimientosPorSede.filter((mov) => {
-      const searchValue = search.toLowerCase();
+      const fechaMov = toDate(getFechaReal(mov));
+      const estaVinculado = Boolean(mov.ingresoId || mov.egresoId);
 
       const matchSearch =
-        mov.cuenta.toLowerCase().includes(searchValue) ||
-        mov.descripcion.toLowerCase().includes(searchValue) ||
-        mov.origen.toLowerCase().includes(searchValue) ||
-        mov.sede.toLowerCase().includes(searchValue);
+        !searchValue ||
+        mov.cuenta?.toLowerCase().includes(searchValue) ||
+        mov.descripcion?.toLowerCase().includes(searchValue) ||
+        mov.origen?.toLowerCase().includes(searchValue) ||
+        mov.sede?.toLowerCase().includes(searchValue);
 
-      const matchEstado = estadoFiltro === "Todos" || mov.estado === estadoFiltro;
+      const matchEstado =
+        estadoFiltro === "Todos" ||
+        mov.estado === estadoFiltro ||
+        (estadoFiltro === "Vinculado" && estaVinculado) ||
+        (estadoFiltro === "Sin vincular" && !estaVinculado);
 
-      return matchSearch && matchEstado;
+      const matchTipo = tipoFiltro === "Todos" || mov.tipo === tipoFiltro;
+      const matchCuenta = cuentaFiltro === "Todas" || mov.cuenta === cuentaFiltro;
+      const matchDesde = !fechaDesde || (fechaMov && fechaMov >= fechaDesde);
+      const matchHasta = !fechaHasta || (fechaMov && fechaMov <= fechaHasta);
+
+      return matchSearch && matchEstado && matchTipo && matchCuenta && matchDesde && matchHasta;
     });
-  }, [movimientosPorSede, search, estadoFiltro]);
+  }, [movimientosPorSede, search, estadoFiltro, tipoFiltro, cuentaFiltro, desde, hasta]);
 
-  const totalIngresos = movimientosPorSede
+  const totalIngresos = movimientosFiltrados
     .filter((m) => m.tipo === "Ingreso")
-    .reduce((acc, m) => acc + Number(m.importe), 0);
+    .reduce((acc, m) => acc + Number(m.importe || 0), 0);
 
-  const totalEgresos = movimientosPorSede
+  const totalEgresos = movimientosFiltrados
     .filter((m) => m.tipo === "Egreso")
-    .reduce((acc, m) => acc + Number(m.importe), 0);
+    .reduce((acc, m) => acc + Number(m.importe || 0), 0);
 
-  const pendientes = movimientosPorSede.filter(
-    (m) => m.estado !== "Conciliado"
-  ).length;
+  const saldoOperativo = totalIngresos - totalEgresos;
+
+  const movimientosPendientes = movimientosFiltrados.filter((m) => m.estado !== "Conciliado");
+  const movimientosVinculados = movimientosFiltrados.filter((m) => m.ingresoId || m.egresoId);
+  const movimientosSinIdentificar = movimientosFiltrados.filter((m) => m.estado === "Movimiento sin identificar");
+
+  const resumenPorCuenta = useMemo(() => {
+    const map = {};
+
+    movimientosFiltrados.forEach((mov) => {
+      if (!map[mov.cuenta]) {
+        map[mov.cuenta] = {
+          cuenta: mov.cuenta,
+          ingresos: 0,
+          egresos: 0,
+          saldo: 0,
+          pendientes: 0,
+          vinculados: 0,
+          movimientos: 0,
+        };
+      }
+
+      if (mov.tipo === "Ingreso") map[mov.cuenta].ingresos += Number(mov.importe || 0);
+      else map[mov.cuenta].egresos += Number(mov.importe || 0);
+
+      map[mov.cuenta].saldo += getSignedAmount(mov);
+      map[mov.cuenta].movimientos += 1;
+
+      if (mov.estado !== "Conciliado") map[mov.cuenta].pendientes += 1;
+      if (mov.ingresoId || mov.egresoId) map[mov.cuenta].vinculados += 1;
+    });
+
+    return Object.values(map).sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+  }, [movimientosFiltrados]);
+
+  const candidatosConciliacion = useMemo(() => {
+    if (!movimientoAConciliar) return [];
+
+    const base = movimientoAConciliar.tipo === "Ingreso" ? ingresos : egresos;
+    const estadoAplicado = movimientoAConciliar.tipo === "Ingreso" ? "Cobrado" : "Pagado";
+
+    return base
+      .filter((item) => {
+        if (item.sedeId !== movimientoAConciliar.sedeId) return false;
+        if (item.estado === estadoAplicado) return false;
+        return true;
+      })
+      .map((item) => {
+        const diffImporte = diferenciaImporte(movimientoAConciliar, item);
+        const diffDias = diferenciaDias(getFechaReal(movimientoAConciliar), getFechaReal(item));
+        const matchExacto = diffImporte === 0;
+        const sugerido = matchExacto && diffDias <= 10;
+
+        return {
+          ...item,
+          diffImporte,
+          diffDias,
+          sugerido,
+          puntaje: (matchExacto ? 0 : diffImporte) + diffDias * 100,
+        };
+      })
+      .sort((a, b) => a.puntaje - b.puntaje)
+      .slice(0, 30);
+  }, [movimientoAConciliar, ingresos, egresos]);
+
+  useEffect(() => {
+    const sugerido = candidatosConciliacion.find((item) => item.sugerido);
+    setComprobanteSeleccionadoId(sugerido?.id || candidatosConciliacion[0]?.id || "");
+  }, [candidatosConciliacion]);
+
+  const nombreArchivo = useMemo(() => {
+    const sede = selectedSede || "Todas las sedes";
+    const periodo = desde || hasta ? `${desde || "inicio"}_${hasta || "actual"}` : "todos_los_periodos";
+    return `Bancos_${safeFileName(sede)}_${safeFileName(periodo)}`;
+  }, [selectedSede, desde, hasta]);
+
+  function aplicarFiltroRapido(tipo) {
+    const hoy = new Date();
+    const isoHoy = hoy.toISOString().split("T")[0];
+
+    if (tipo === "hoy") {
+      setDesde(isoHoy);
+      setHasta(isoHoy);
+    }
+
+    if (tipo === "mes") {
+      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split("T")[0];
+      setDesde(inicioMes);
+      setHasta(isoHoy);
+    }
+
+    if (tipo === "pendientes") setEstadoFiltro("Pendiente");
+    if (tipo === "sin-vincular") setEstadoFiltro("Sin vincular");
+
+    if (tipo === "limpiar") {
+      setSearch("");
+      setEstadoFiltro("Todos");
+      setTipoFiltro("Todos");
+      setCuentaFiltro("Todas");
+      setDesde("");
+      setHasta("");
+    }
+  }
+
+  function openConciliacion(mov) {
+    setMovimientoAConciliar(mov);
+    setModal("conciliar");
+  }
+
+  async function handleConfirmarConciliacion() {
+    if (!movimientoAConciliar || !comprobanteSeleccionadoId) return;
+
+    setSaving(true);
+
+    try {
+      if (movimientoAConciliar.tipo === "Ingreso") {
+        await conciliarMovimientoConIngreso(movimientoAConciliar.id, comprobanteSeleccionadoId);
+      } else {
+        await conciliarMovimientoConEgreso(movimientoAConciliar.id, comprobanteSeleccionadoId);
+      }
+
+      await loadData();
+      setModal(null);
+      setMovimientoAConciliar(null);
+      setComprobanteSeleccionadoId("");
+    } catch (error) {
+      console.error("Error conciliando movimiento:", error);
+      alert(error.message || "No se pudo conciliar el movimiento.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDesconciliar(mov) {
+    const ok = window.confirm("¿Quitar el vínculo de conciliación de este movimiento?");
+    if (!ok) return;
+
+    try {
+      await desconciliarMovimientoBancario(mov.id);
+      await loadData();
+    } catch (error) {
+      alert(error.message || "No se pudo desconciliar el movimiento.");
+    }
+  }
 
   async function handleCreate(e) {
     e.preventDefault();
@@ -117,15 +364,9 @@ export default function Bancos({ selectedSede }) {
     try {
       await createMovimientoBancario(form);
       await loadData();
-
-      setForm({
-        ...emptyForm,
-        sedeId: sedes[0]?.id || "",
-      });
-
+      setForm({ ...emptyForm, sedeId: sedes[0]?.id || "", cuenta: cuentasPorSede[0]?.nombre || cuentas[0]?.nombre || "" });
       setModal(null);
     } catch (error) {
-      console.error("Error creando movimiento:", error);
       alert(error.message || "No se pudo crear el movimiento bancario.");
     } finally {
       setSaving(false);
@@ -133,45 +374,26 @@ export default function Bancos({ selectedSede }) {
   }
 
   async function handleImportarExtracto() {
-    alert("Importación de extractos pendiente. Por ahora la carga es manual.");
+    alert("Importación de extractos pendiente. Próxima mejora: carga CSV/Excel del banco y preconciliación automática.");
   }
 
-  async function handleConciliar() {
-    const confirmConciliar = window.confirm(
-      "¿Marcar todos los movimientos pendientes como conciliados?"
-    );
-
-    if (!confirmConciliar) return;
-
-    try {
-      await conciliarMovimientosPendientes();
-      await loadData();
-    } catch (error) {
-      console.error("Error conciliando movimientos:", error);
-      alert(error.message || "No se pudieron conciliar los movimientos.");
-    }
-  }
-
-  async function handleConciliarUno(id) {
-    try {
-      await conciliarMovimientoBancario(id);
-      await loadData();
-    } catch (error) {
-      console.error("Error conciliando movimiento:", error);
-      alert(error.message || "No se pudo conciliar el movimiento.");
-    }
+  function handleConciliar() {
+    setEstadoFiltro("Sin vincular");
   }
 
   async function handleDelete(id) {
     const confirmDelete = window.confirm("¿Eliminar este movimiento bancario?");
     if (!confirmDelete) return;
 
+    setDeletingId(id);
+
     try {
       await deleteMovimientoBancario(id);
       await loadData();
     } catch (error) {
-      console.error("Error eliminando movimiento:", error);
       alert(error.message || "No se pudo eliminar el movimiento.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -181,342 +403,300 @@ export default function Bancos({ selectedSede }) {
 
     try {
       await createCuentaBancaria(cuentaForm);
-      const cuentasData = await getCuentasBancarias();
-      setCuentas(cuentasData);
-
-      setCuentaForm({
-        nombre: "",
-        tipo: "Banco",
-        sedeId: "",
-      });
-
+      await loadData();
+      setCuentaForm(emptyCuentaForm);
       setModal(null);
     } catch (error) {
-      console.error("Error creando cuenta:", error);
       alert(error.message || "No se pudo crear la cuenta bancaria.");
     } finally {
       setSaving(false);
     }
   }
 
+  const exportarExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Genetics - TECNEW";
+    workbook.created = new Date();
+
+    const resumenSheet = workbook.addWorksheet("Resumen");
+    resumenSheet.columns = [
+      { header: "Indicador", key: "indicador", width: 35 },
+      { header: "Valor", key: "valor", width: 22 },
+    ];
+    resumenSheet.addRows([
+      { indicador: "Sede", valor: selectedSede || "Todas las sedes" },
+      { indicador: "Ingresos bancarios", valor: totalIngresos },
+      { indicador: "Egresos bancarios", valor: totalEgresos },
+      { indicador: "Saldo operativo", valor: saldoOperativo },
+      { indicador: "Pendientes", valor: movimientosPendientes.length },
+      { indicador: "Vinculados", valor: movimientosVinculados.length },
+      { indicador: "Sin identificar", valor: movimientosSinIdentificar.length },
+    ]);
+
+    const cuentasSheet = workbook.addWorksheet("Resumen por cuenta");
+    cuentasSheet.columns = [
+      { header: "Cuenta", key: "cuenta", width: 32 },
+      { header: "Ingresos", key: "ingresos", width: 18 },
+      { header: "Egresos", key: "egresos", width: 18 },
+      { header: "Saldo", key: "saldo", width: 18 },
+      { header: "Pendientes", key: "pendientes", width: 14 },
+      { header: "Vinculados", key: "vinculados", width: 14 },
+      { header: "Movimientos", key: "movimientos", width: 14 },
+    ];
+    cuentasSheet.addRows(resumenPorCuenta);
+
+    const movimientosSheet = workbook.addWorksheet("Movimientos");
+    movimientosSheet.columns = [
+      { header: "Fecha", key: "fecha", width: 14 },
+      { header: "Sede", key: "sede", width: 24 },
+      { header: "Cuenta", key: "cuenta", width: 28 },
+      { header: "Tipo", key: "tipo", width: 14 },
+      { header: "Descripción", key: "descripcion", width: 44 },
+      { header: "Importe", key: "importe", width: 18 },
+      { header: "Origen", key: "origen", width: 22 },
+      { header: "Estado", key: "estado", width: 20 },
+      { header: "Vínculo", key: "vinculo", width: 22 },
+    ];
+    movimientosSheet.addRows(
+      movimientosFiltrados.map((mov) => ({
+        fecha: formatDate(getFechaReal(mov)),
+        sede: mov.sede,
+        cuenta: mov.cuenta,
+        tipo: mov.tipo,
+        descripcion: mov.descripcion,
+        importe: mov.tipo === "Egreso" ? -mov.importe : mov.importe,
+        origen: mov.origen,
+        estado: mov.estado,
+        vinculo: mov.ingresoId ? `Ingreso ${mov.ingresoId}` : mov.egresoId ? `Egreso ${mov.egresoId}` : "Sin vincular",
+      }))
+    );
+
+    workbook.worksheets.forEach((sheet) => {
+      sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
+      sheet.eachRow((row) => row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFE5E7EB" } },
+          left: { style: "thin", color: { argb: "FFE5E7EB" } },
+          bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+          right: { style: "thin", color: { argb: "FFE5E7EB" } },
+        };
+      }));
+    });
+
+    [resumenSheet.getColumn("valor"), cuentasSheet.getColumn("ingresos"), cuentasSheet.getColumn("egresos"), cuentasSheet.getColumn("saldo"), movimientosSheet.getColumn("importe")].forEach((column) => {
+      column.numFmt = '"$"#,##0.00';
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const data = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    saveAs(data, `${nombreArchivo}.xlsx`);
+  };
+
+  const exportarPDF = () => {
+    const doc = new jsPDF("landscape", "mm", "a4");
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.text("GENETICS", 14, 16);
+    doc.setFontSize(15);
+    doc.text("Reporte bancario y conciliación", 14, 26);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("Reporte generado por plataforma creada por TECNEW", 14, 32);
+    doc.setDrawColor(210);
+    doc.line(14, 37, pageWidth - 14, 37);
+
+    doc.text(`Sede: ${selectedSede || "Todas las sedes"}`, 14, 44);
+    doc.text(`Cuenta: ${cuentaFiltro}`, 14, 49);
+    doc.text(`Estado: ${estadoFiltro}`, 14, 54);
+    doc.text(`Periodo: ${desde ? formatDate(desde) : "Inicio"} al ${hasta ? formatDate(hasta) : "Actual"}`, 14, 59);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`Ingresos: ${formatMoney(totalIngresos)}`, 155, 44);
+    doc.text(`Egresos: ${formatMoney(totalEgresos)}`, 155, 49);
+    doc.text(`Saldo: ${formatMoney(saldoOperativo)}`, 155, 54);
+    doc.text(`Vinculados: ${movimientosVinculados.length}`, 155, 59);
+
+    autoTable(doc, {
+      startY: 68,
+      head: [["Cuenta", "Ingresos", "Egresos", "Saldo", "Pend.", "Vinc.", "Mov."]],
+      body: resumenPorCuenta.map((item) => [item.cuenta, formatMoney(item.ingresos), formatMoney(item.egresos), formatMoney(item.saldo), item.pendientes, item.vinculados, item.movimientos]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "center" }, 5: { halign: "center" }, 6: { halign: "center" } },
+    });
+
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [["Fecha", "Sede", "Cuenta", "Tipo", "Descripción", "Importe", "Estado", "Vínculo"]],
+      body: movimientosFiltrados.map((mov) => [formatDate(getFechaReal(mov)), mov.sede, mov.cuenta, mov.tipo, mov.descripcion, formatMoney(mov.tipo === "Egreso" ? -mov.importe : mov.importe), mov.estado, mov.ingresoId ? "Ingreso" : mov.egresoId ? "Egreso" : "Sin vincular"]),
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+      columnStyles: { 5: { halign: "right" } },
+    });
+
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(130);
+      doc.text("Generado por plataforma TECNEW", 14, pageHeight - 8);
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth - 35, pageHeight - 8);
+    }
+
+    doc.save(`${nombreArchivo}.pdf`);
+  };
+
   return (
     <section className="page">
       <div className="page-header">
         <div>
           <h2>Bancos y conciliación</h2>
-          <p>Registro de cuentas, carga de extractos y conciliación de movimientos.</p>
+          <p>Control de cuentas bancarias, caja, billeteras y conciliación real contra ingresos/egresos.</p>
         </div>
 
         <div className="header-actions">
+          <button className="secondary-button" onClick={loadData} disabled={loading}>
+            <RefreshCw size={16} /> Actualizar
+          </button>
           <button className="secondary-button" onClick={handleImportarExtracto}>
             <Upload size={16} /> Importar extracto
           </button>
-
           <button className="secondary-button" onClick={handleConciliar}>
-            <GitCompare size={16} /> Conciliar
+            <GitCompare size={16} /> Ver sin vincular
           </button>
-
-          <button className="primary-button" onClick={() => setModal("nuevo")}>
-            <Plus size={16} /> Nuevo movimiento
-          </button>
-
           <button className="secondary-button" onClick={() => setModal("nuevaCuenta")}>
             <Plus size={16} /> Nueva cuenta
+          </button>
+          <button className="primary-button" onClick={() => setModal("nuevo")}>
+            <Plus size={16} /> Nuevo movimiento
           </button>
         </div>
       </div>
 
       <div className="stats-grid small">
-        <div className="stat-card">
-          <div>
-            <span>Ingresos bancarios</span>
-            <strong>{formatMoney(totalIngresos)}</strong>
-            <small>Movimientos registrados</small>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div>
-            <span>Egresos bancarios</span>
-            <strong>{formatMoney(totalEgresos)}</strong>
-            <small>Pagos y débitos</small>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div>
-            <span>Saldo operativo</span>
-            <strong>{formatMoney(totalIngresos - totalEgresos)}</strong>
-            <small>Según movimientos cargados</small>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div>
-            <span>Pendientes</span>
-            <strong>{pendientes}</strong>
-            <small>Requieren revisión</small>
-          </div>
-        </div>
+        <div className="stat-card"><div><span>Ingresos bancarios</span><strong>{formatMoney(totalIngresos)}</strong><small>{movimientosFiltrados.filter((m) => m.tipo === "Ingreso").length} movimientos</small></div></div>
+        <div className="stat-card"><div><span>Egresos bancarios</span><strong>{formatMoney(totalEgresos)}</strong><small>{movimientosFiltrados.filter((m) => m.tipo === "Egreso").length} movimientos</small></div></div>
+        <div className="stat-card"><div><span>Saldo operativo</span><strong>{formatMoney(saldoOperativo)}</strong><small>Ingresos menos egresos</small></div></div>
+        <div className="stat-card"><div><span>Conciliación real</span><strong>{movimientosVinculados.length}</strong><small>{movimientosPendientes.length} pendientes · {movimientosSinIdentificar.length} sin identificar</small></div></div>
       </div>
 
       <div className="filters-bar">
-        <input
-          placeholder="Buscar por cuenta, descripción, sede u origen..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <input placeholder="Buscar por cuenta, descripción, sede u origen..." value={search} onChange={(e) => setSearch(e.target.value)} />
 
-        <select
-          value={estadoFiltro}
-          onChange={(e) => setEstadoFiltro(e.target.value)}
-        >
-          <option>Todos</option>
-          <option>Conciliado</option>
-          <option>Pendiente</option>
-          <option>Movimiento sin identificar</option>
-        </select>
+        <label className="filter-field"><span>Cuenta</span><select value={cuentaFiltro} onChange={(e) => setCuentaFiltro(e.target.value)}><option>Todas</option>{cuentasPorSede.map((cuenta) => <option key={cuenta.id} value={cuenta.nombre}>{cuenta.nombre}</option>)}</select></label>
+        <label className="filter-field"><span>Tipo</span><select value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}><option>Todos</option><option>Ingreso</option><option>Egreso</option></select></label>
+        <label className="filter-field"><span>Estado</span><select value={estadoFiltro} onChange={(e) => setEstadoFiltro(e.target.value)}><option>Todos</option><option>Conciliado</option><option>Pendiente</option><option>Movimiento sin identificar</option><option>Vinculado</option><option>Sin vincular</option></select></label>
+
+        <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("hoy")}>Hoy</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("mes")}>Este mes</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("pendientes")}>Pendientes</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("sin-vincular")}>Sin vincular</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("limpiar")}>Limpiar</button>
+        <button className="secondary-button" onClick={exportarExcel} disabled={loading}><FileSpreadsheet size={15} /> Excel</button>
+        <button className="primary-button" onClick={exportarPDF} disabled={loading}><FileText size={15} /> PDF</button>
       </div>
 
-      <div className="table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Sede</th>
-              <th>Cuenta</th>
-              <th>Tipo</th>
-              <th>Descripción</th>
-              <th>Importe</th>
-              <th>Origen</th>
-              <th>Estado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan="9">Cargando movimientos bancarios...</td>
-              </tr>
-            )}
-
-            {!loading &&
-              movimientosFiltrados.map((mov) => (
-                <tr key={mov.id}>
-                  <td>{mov.fecha}</td>
-                  <td>{mov.sede}</td>
-                  <td>{mov.cuenta}</td>
-                  <td>{mov.tipo}</td>
-                  <td>{mov.descripcion}</td>
-                  <td>{formatMoney(mov.importe)}</td>
-                  <td>{mov.origen}</td>
-                  <td>
-                    <span
-                      className={`status-badge ${mov.estado
-                        .toLowerCase()
-                        .replaceAll(" ", "-")}`}
-                    >
-                      {mov.estado}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="table-actions">
-                      {mov.estado !== "Conciliado" && (
-                        <button onClick={() => handleConciliarUno(mov.id)}>
-                          <CheckCircle size={16} />
-                        </button>
-                      )}
-
-                      <button onClick={() => handleDelete(mov.id)}>
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-
-            {!loading && movimientosFiltrados.length === 0 && (
-              <tr>
-                <td colSpan="9">No se encontraron movimientos.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="panel">
+        <h3>Resumen por cuenta</h3>
+        <div className="table-card"><table><thead><tr><th>Cuenta</th><th>Ingresos</th><th>Egresos</th><th>Saldo</th><th>Pendientes</th><th>Vinculados</th><th>Movimientos</th></tr></thead><tbody>{resumenPorCuenta.map((item) => <tr key={item.cuenta}><td><strong>{item.cuenta}</strong></td><td>{formatMoney(item.ingresos)}</td><td>{formatMoney(item.egresos)}</td><td><strong>{formatMoney(item.saldo)}</strong></td><td>{item.pendientes}</td><td>{item.vinculados}</td><td>{item.movimientos}</td></tr>)}{!loading && resumenPorCuenta.length === 0 && <tr><td colSpan="7">No hay cuentas con movimientos para los filtros seleccionados.</td></tr>}</tbody></table></div>
       </div>
+
+      <div className="panel" style={{ marginTop: 18 }}>
+        <h3>Movimientos bancarios</h3>
+        <div className="table-card">
+          <table>
+            <thead><tr><th>Fecha</th><th>Sede</th><th>Cuenta</th><th>Tipo</th><th>Descripción</th><th>Importe</th><th>Origen</th><th>Estado</th><th>Vínculo</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {loading && <tr><td colSpan="10">Cargando movimientos bancarios...</td></tr>}
+              {!loading && movimientosFiltrados.map((mov) => {
+                const vinculado = mov.ingresoId || mov.egresoId;
+                return (
+                  <tr key={mov.id}>
+                    <td>{formatDate(getFechaReal(mov))}</td><td>{mov.sede}</td><td>{mov.cuenta}</td><td>{mov.tipo}</td><td>{mov.descripcion}</td><td><strong>{formatMoney(mov.tipo === "Egreso" ? -mov.importe : mov.importe)}</strong></td><td>{mov.origen}</td>
+                    <td><span className={`status-badge ${mov.estado.toLowerCase().replaceAll(" ", "-")}`}>{mov.estado}</span></td>
+                    <td>{vinculado ? <span className="status-badge aplicado">{mov.ingresoId ? "Ingreso vinculado" : "Egreso vinculado"}</span> : <span className="status-badge pendiente">Sin vincular</span>}</td>
+                    <td><div className="table-actions">
+                      {!vinculado && <button title="Conciliar" onClick={() => openConciliacion(mov)}><Link2 size={16} /></button>}
+                      {vinculado && <button title="Desconciliar" onClick={() => handleDesconciliar(mov)}><Unlink size={16} /></button>}
+                      <button onClick={() => handleDelete(mov.id)} disabled={deletingId === mov.id}><Trash2 size={16} /></button>
+                    </div></td>
+                  </tr>
+                );
+              })}
+              {!loading && movimientosFiltrados.length === 0 && <tr><td colSpan="10">No se encontraron movimientos.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {modal === "conciliar" && movimientoAConciliar && (
+        <Modal title="Conciliar movimiento bancario" onClose={() => setModal(null)}>
+          <div className="detail-grid" style={{ marginBottom: 14 }}>
+            <div><span>Movimiento</span><strong>{movimientoAConciliar.descripcion}</strong></div>
+            <div><span>Importe</span><strong>{formatMoney(movimientoAConciliar.importe)}</strong></div>
+            <div><span>Tipo</span><strong>{movimientoAConciliar.tipo}</strong></div>
+            <div><span>Sede</span><strong>{movimientoAConciliar.sede}</strong></div>
+          </div>
+
+          <div className="table-card" style={{ maxHeight: 360, overflowY: "auto" }}>
+            <table>
+              <thead><tr><th>Seleccionar</th><th>Fecha</th><th>{movimientoAConciliar.tipo === "Ingreso" ? "Concepto" : "Proveedor"}</th><th>Detalle</th><th>Importe</th><th>Estado</th><th>Match</th></tr></thead>
+              <tbody>
+                {candidatosConciliacion.map((item) => (
+                  <tr key={item.id}>
+                    <td><input type="radio" name="comprobante" checked={comprobanteSeleccionadoId === item.id} onChange={() => setComprobanteSeleccionadoId(item.id)} /></td>
+                    <td>{formatDate(getFechaReal(item))}</td>
+                    <td>{movimientoAConciliar.tipo === "Ingreso" ? item.concepto : item.proveedor}</td>
+                    <td>{movimientoAConciliar.tipo === "Ingreso" ? item.origen : item.concepto}</td>
+                    <td>{formatMoney(item.importe)}</td>
+                    <td><span className={`status-badge ${item.estado.toLowerCase()}`}>{item.estado}</span></td>
+                    <td>{item.sugerido ? <span className="status-badge aplicado">Sugerido</span> : `Dif: ${formatMoney(item.diffImporte)}`}</td>
+                  </tr>
+                ))}
+                {candidatosConciliacion.length === 0 && <tr><td colSpan="7">No hay comprobantes pendientes compatibles para esta sede.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={() => setModal(null)}>Cancelar</button>
+            <button type="button" className="primary-button" disabled={saving || !comprobanteSeleccionadoId} onClick={handleConfirmarConciliacion}>{saving ? "Conciliando..." : "Confirmar conciliación"}</button>
+          </div>
+        </Modal>
+      )}
 
       {modal === "nuevo" && (
         <Modal title="Nuevo movimiento bancario" onClose={() => setModal(null)}>
           <form className="form-grid" onSubmit={handleCreate}>
-            <label>
-              Fecha
-              <input
-                type="date"
-                required
-                value={form.fecha}
-                onChange={(e) => setForm({ ...form, fecha: e.target.value })}
-              />
-            </label>
-
-            <label>
-              Sede
-              <select
-                value={form.sedeId}
-                onChange={(e) => setForm({ ...form, sedeId: e.target.value })}
-                required
-              >
-                {sedes.map((sede) => (
-                  <option key={sede.id} value={sede.id}>
-                    {sede.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Cuenta
-              <select
-                required
-                value={form.cuenta}
-                onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
-              >
-                <option value="">Seleccionar cuenta</option>
-                {cuentas
-                  .filter((cuenta) => cuenta.activa)
-                  .map((cuenta) => (
-                    <option key={cuenta.id} value={cuenta.nombre}>
-                      {cuenta.nombre}
-                    </option>
-                  ))}
-              </select>
-            </label>
-
-            <label>
-              Tipo
-              <select
-                value={form.tipo}
-                onChange={(e) => setForm({ ...form, tipo: e.target.value })}
-              >
-                <option>Ingreso</option>
-                <option>Egreso</option>
-              </select>
-            </label>
-
-            <label>
-              Estado
-              <select
-                value={form.estado}
-                onChange={(e) => setForm({ ...form, estado: e.target.value })}
-              >
-                <option>Pendiente</option>
-                <option>Conciliado</option>
-                <option>Movimiento sin identificar</option>
-              </select>
-            </label>
-
-            <label>
-              Importe
-              <input
-                type="number"
-                required
-                value={form.importe}
-                onChange={(e) => setForm({ ...form, importe: e.target.value })}
-              />
-            </label>
-
-            <label className="full">
-              Descripción
-              <input
-                required
-                value={form.descripcion}
-                onChange={(e) =>
-                  setForm({ ...form, descripcion: e.target.value })
-                }
-              />
-            </label>
-
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setModal(null)}
-              >
-                Cancelar
-              </button>
-
-              <button type="submit" className="primary-button" disabled={saving}>
-                {saving ? "Guardando..." : "Guardar movimiento"}
-              </button>
-            </div>
+            <label>Fecha<input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></label>
+            <label>Sede<select value={form.sedeId} onChange={(e) => setForm({ ...form, sedeId: e.target.value })} required>{sedes.map((sede) => <option key={sede.id} value={sede.id}>{sede.nombre}</option>)}</select></label>
+            <label>Cuenta<select required value={form.cuenta} onChange={(e) => setForm({ ...form, cuenta: e.target.value })}><option value="">Seleccionar cuenta</option>{cuentasPorSede.map((cuenta) => <option key={cuenta.id} value={cuenta.nombre}>{cuenta.nombre}</option>)}</select></label>
+            <label>Tipo<select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}><option>Ingreso</option><option>Egreso</option></select></label>
+            <label>Estado<select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}><option>Pendiente</option><option>Conciliado</option><option>Movimiento sin identificar</option></select></label>
+            <label>Importe<input type="number" step="0.01" min="0" required value={form.importe} onChange={(e) => setForm({ ...form, importe: e.target.value })} /></label>
+            <label className="full">Descripción<input required value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} /></label>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setModal(null)}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Guardando..." : "Guardar movimiento"}</button></div>
           </form>
         </Modal>
       )}
 
-      {
-        modal === "nuevaCuenta" && (
-          <Modal title="Nueva cuenta bancaria" onClose={() => setModal(null)}>
-            <form className="form-grid" onSubmit={handleCreateCuenta}>
-              <label>
-                Nombre de cuenta
-                <input
-                  required
-                  placeholder="Ej: Banco Galicia - CC $"
-                  value={cuentaForm.nombre}
-                  onChange={(e) =>
-                    setCuentaForm({ ...cuentaForm, nombre: e.target.value })
-                  }
-                />
-              </label>
-
-              <label>
-                Tipo
-                <select
-                  value={cuentaForm.tipo}
-                  onChange={(e) =>
-                    setCuentaForm({ ...cuentaForm, tipo: e.target.value })
-                  }
-                >
-                  <option>Banco</option>
-                  <option>Billetera virtual</option>
-                  <option>Caja</option>
-                  <option>Otro</option>
-                </select>
-              </label>
-
-              <label>
-                Sede
-                <select
-                  value={cuentaForm.sedeId}
-                  onChange={(e) =>
-                    setCuentaForm({ ...cuentaForm, sedeId: e.target.value })
-                  }
-                >
-                  <option value="">Todas las sedes</option>
-                  {sedes.map((sede) => (
-                    <option key={sede.id} value={sede.id}>
-                      {sede.nombre}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setModal(null)}
-                >
-                  Cancelar
-                </button>
-
-                <button type="submit" className="primary-button" disabled={saving}>
-                  {saving ? "Guardando..." : "Crear cuenta"}
-                </button>
-              </div>
-            </form>
-          </Modal>
-        )
-      }
+      {modal === "nuevaCuenta" && (
+        <Modal title="Nueva cuenta bancaria" onClose={() => setModal(null)}>
+          <form className="form-grid" onSubmit={handleCreateCuenta}>
+            <label>Nombre de cuenta<input required placeholder="Ej: Banco Galicia - CC $" value={cuentaForm.nombre} onChange={(e) => setCuentaForm({ ...cuentaForm, nombre: e.target.value })} /></label>
+            <label>Tipo<select value={cuentaForm.tipo} onChange={(e) => setCuentaForm({ ...cuentaForm, tipo: e.target.value })}><option>Banco</option><option>Billetera virtual</option><option>Caja</option><option>Otro</option></select></label>
+            <label>Sede<select value={cuentaForm.sedeId} onChange={(e) => setCuentaForm({ ...cuentaForm, sedeId: e.target.value })}><option value="">Todas las sedes</option>{sedes.map((sede) => <option key={sede.id} value={sede.id}>{sede.nombre}</option>)}</select></label>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setModal(null)}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Guardando..." : "Crear cuenta"}</button></div>
+          </form>
+        </Modal>
+      )}
     </section>
   );
 }

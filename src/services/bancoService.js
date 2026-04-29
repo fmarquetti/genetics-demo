@@ -1,3 +1,4 @@
+// src/services/bancoService.js
 import { supabase } from "../lib/supabaseClient";
 
 function formatFecha(fecha) {
@@ -19,6 +20,9 @@ function mapMovimiento(row) {
     importe: Number(row.importe || 0),
     origen: row.origen,
     estado: row.estado,
+
+    ingresoId: row.ingreso_id || null,
+    egresoId: row.egreso_id || null,
   };
 }
 
@@ -75,14 +79,76 @@ export async function deleteMovimientoBancario(id) {
   if (error) throw error;
 }
 
-export async function conciliarMovimientoBancario(id) {
-  const { error } = await supabase
+/* =========================================================
+   CONCILIACIÓN REAL
+   ========================================================= */
+
+export async function conciliarConIngreso(movimientoId, ingresoId) {
+  // 1. Vincular movimiento con ingreso
+  const { error: errorMovimiento } = await supabase
     .from("movimientos_bancarios")
     .update({
       estado: "Conciliado",
+      ingreso_id: ingresoId,
+      egreso_id: null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", movimientoId);
+
+  if (errorMovimiento) throw errorMovimiento;
+
+  // 2. Marcar ingreso como cobrado
+  const { error: errorIngreso } = await supabase
+    .from("ingresos")
+    .update({
+      estado: "Cobrado",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", ingresoId);
+
+  if (errorIngreso) throw errorIngreso;
+}
+
+export async function conciliarConEgreso(movimientoId, egresoId) {
+  // 1. Vincular movimiento con egreso
+  const { error: errorMovimiento } = await supabase
+    .from("movimientos_bancarios")
+    .update({
+      estado: "Conciliado",
+      egreso_id: egresoId,
+      ingreso_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", movimientoId);
+
+  if (errorMovimiento) throw errorMovimiento;
+
+  // 2. Marcar egreso como pagado
+  const { error: errorEgreso } = await supabase
+    .from("egresos")
+    .update({
+      estado: "Pagado",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", egresoId);
+
+  if (errorEgreso) throw errorEgreso;
+}
+
+/* =========================================================
+   UTILIDADES
+   ========================================================= */
+
+export async function desconciliarMovimiento(movimientoId) {
+  const { error } = await supabase
+    .from("movimientos_bancarios")
+    .update({
+      estado: "Pendiente",
+      ingreso_id: null,
+      egreso_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", movimientoId);
 
   if (error) throw error;
 }
