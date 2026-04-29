@@ -1,11 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Banknote,
+  RefreshCw,
   TrendingUp,
   Wallet,
-  AlertTriangle,
-  Banknote,
-  Activity,
 } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+import StatCard from "../components/StatCard";
+import DataTable from "../components/DataTable";
 
 import { getIngresos } from "../services/ingresoService";
 import { getEgresos } from "../services/egresoService";
@@ -13,250 +29,527 @@ import { getMovimientosBancarios } from "../services/bancoService";
 import { getCuentasCorrientes } from "../services/cuentaCorrienteService";
 
 const formatMoney = (value = 0) =>
-  `$ ${Number(value).toLocaleString("es-AR", {
+  `$ ${Number(value || 0).toLocaleString("es-AR", {
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })}`;
 
-function filterBySede(items, selectedSede) {
-  if (!selectedSede || selectedSede === "Todas las sedes") return items;
-  return items.filter((i) => i.sede === selectedSede || i.sede === "Todas");
-}
+const toNumber = (value) => Number(value || 0);
 
-function isPendiente(estado) {
-  const v = String(estado || "").toLowerCase();
-  return !["cobrado", "pagado", "conciliado", "aplicado"].includes(v);
-}
+const getSedeName = (item) => item?.sede || "Sin sede";
+const getFechaReal = (item) => item?.fechaDb || item?.fecha;
+
+const isSameSede = (item, selectedSede) => {
+  if (!selectedSede || selectedSede === "Todas las sedes") return true;
+  return getSedeName(item) === selectedSede || getSedeName(item) === "Todas";
+};
+
+const isPending = (estado) => {
+  const value = String(estado || "").toLowerCase();
+  return !["cobrado", "pagado", "aplicado", "conciliado"].includes(value);
+};
+
+const parseDate = (fecha) => {
+  if (!fecha) return null;
+
+  if (String(fecha).includes("/")) {
+    const [dd, mm, yyyy] = fecha.split("/");
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+  }
+
+  return new Date(`${String(fecha).split("T")[0]}T00:00:00`);
+};
+
+const monthLabel = (date) =>
+  date.toLocaleDateString("es-AR", {
+    month: "short",
+    year: "2-digit",
+  });
+
+const buildMonthlyChartData = (ingresos, egresos) => {
+  const allDates = [...ingresos, ...egresos]
+    .map((item) => parseDate(getFechaReal(item)))
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+
+  const now = new Date();
+  const firstDate =
+    allDates[0] || new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+  const start = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const months = [];
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    const key = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+
+    months.push({
+      key,
+      periodo: monthLabel(cursor),
+      ingresos: 0,
+      egresos: 0,
+      resultado: 0,
+    });
+
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  const map = Object.fromEntries(months.map((m) => [m.key, m]));
+
+  ingresos.forEach((item) => {
+    const date = parseDate(getFechaReal(item));
+    if (!date) return;
+
+    const key = `${date.getFullYear()}-${date.getMonth()}`;
+    if (map[key]) map[key].ingresos += toNumber(item.importe);
+  });
+
+  egresos.forEach((item) => {
+    const date = parseDate(getFechaReal(item));
+    if (!date) return;
+
+    const key = `${date.getFullYear()}-${date.getMonth()}`;
+    if (map[key]) map[key].egresos += toNumber(item.importe);
+  });
+
+  return months.map((item) => ({
+    ...item,
+    resultado: item.ingresos - item.egresos,
+  }));
+};
+
+const getCuentaCorrienteImpacto = (item) => {
+  const comprobantesDeuda = [
+    "Factura",
+    "Factura A",
+    "Factura B",
+    "Factura C",
+    "Nota de Débito",
+  ];
+
+  const esProveedor = item.tipoEntidad === "Proveedor";
+  const sumaDeuda = comprobantesDeuda.includes(item.comprobante);
+
+  if (esProveedor) return sumaDeuda ? toNumber(item.importe) : -toNumber(item.importe);
+
+  return sumaDeuda ? toNumber(item.importe) : -toNumber(item.importe);
+};
 
 export default function Dashboard({ selectedSede }) {
   const [ingresos, setIngresos] = useState([]);
   const [egresos, setEgresos] = useState([]);
-  const [bancos, setBancos] = useState([]);
-  const [cuentas, setCuentas] = useState([]);
+  const [movimientos, setMovimientos] = useState([]);
+  const [cuentasCorrientes, setCuentasCorrientes] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  async function loadData() {
-    setLoading(true);
+  async function loadDashboard() {
     try {
-      const [i, e, b, c] = await Promise.all([
+      setLoading(true);
+      setError("");
+
+      const [
+        ingresosData,
+        egresosData,
+        movimientosData,
+        cuentasCorrientesData,
+      ] = await Promise.all([
         getIngresos(),
         getEgresos(),
         getMovimientosBancarios(),
         getCuentasCorrientes(),
       ]);
 
-      setIngresos(i || []);
-      setEgresos(e || []);
-      setBancos(b || []);
-      setCuentas(c || []);
+      setIngresos(ingresosData || []);
+      setEgresos(egresosData || []);
+      setMovimientos(movimientosData || []);
+      setCuentasCorrientes(cuentasCorrientesData || []);
     } catch (err) {
-      console.error(err);
-      alert("Error cargando dashboard");
+      console.error("Error cargando dashboard:", err);
+      setError("No se pudo cargar la información del dashboard.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadData();
+    loadDashboard();
   }, []);
 
   const ingresosFiltrados = useMemo(
-    () => filterBySede(ingresos, selectedSede),
+    () => ingresos.filter((item) => isSameSede(item, selectedSede)),
     [ingresos, selectedSede]
   );
 
   const egresosFiltrados = useMemo(
-    () => filterBySede(egresos, selectedSede),
+    () => egresos.filter((item) => isSameSede(item, selectedSede)),
     [egresos, selectedSede]
   );
 
-  const bancosFiltrados = useMemo(
-    () => filterBySede(bancos, selectedSede),
-    [bancos, selectedSede]
+  const movimientosFiltrados = useMemo(
+    () => movimientos.filter((item) => isSameSede(item, selectedSede)),
+    [movimientos, selectedSede]
   );
 
   const cuentasFiltradas = useMemo(
-    () => filterBySede(cuentas, selectedSede),
-    [cuentas, selectedSede]
+    () => cuentasCorrientes.filter((item) => isSameSede(item, selectedSede)),
+    [cuentasCorrientes, selectedSede]
   );
 
-  // ================= KPIs =================
-
-  const totalIngresos = ingresosFiltrados.reduce(
-    (acc, i) => acc + Number(i.importe || 0),
-    0
+  const totalIngresos = useMemo(
+    () => ingresosFiltrados.reduce((acc, item) => acc + toNumber(item.importe), 0),
+    [ingresosFiltrados]
   );
 
-  const totalEgresos = egresosFiltrados.reduce(
-    (acc, e) => acc + Number(e.importe || 0),
-    0
+  const totalEgresos = useMemo(
+    () => egresosFiltrados.reduce((acc, item) => acc + toNumber(item.importe), 0),
+    [egresosFiltrados]
   );
 
   const resultado = totalIngresos - totalEgresos;
 
-  const caja = bancosFiltrados.reduce((acc, m) => {
-    return m.tipo === "Ingreso"
-      ? acc + m.importe
-      : acc - m.importe;
-  }, 0);
+  const cajaBancos = useMemo(
+    () =>
+      movimientosFiltrados.reduce((acc, item) => {
+        return item.tipo === "Egreso"
+          ? acc - toNumber(item.importe)
+          : acc + toNumber(item.importe);
+      }, 0),
+    [movimientosFiltrados]
+  );
 
-  const aCobrar = cuentasFiltradas
-    .filter((c) => c.tipoEntidad !== "Proveedor")
-    .reduce((acc, c) => acc + c.importe, 0);
+  const aCobrar = useMemo(
+    () =>
+      cuentasFiltradas
+        .filter((item) => item.tipoEntidad !== "Proveedor")
+        .filter((item) => isPending(item.estado))
+        .reduce((acc, item) => acc + Math.max(0, getCuentaCorrienteImpacto(item)), 0),
+    [cuentasFiltradas]
+  );
 
-  const aPagar = cuentasFiltradas
-    .filter((c) => c.tipoEntidad === "Proveedor")
-    .reduce((acc, c) => acc + c.importe, 0);
+  const aPagar = useMemo(
+    () =>
+      cuentasFiltradas
+        .filter((item) => item.tipoEntidad === "Proveedor")
+        .filter((item) => isPending(item.estado))
+        .reduce((acc, item) => acc + Math.max(0, getCuentaCorrienteImpacto(item)), 0),
+    [cuentasFiltradas]
+  );
 
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
+  const cuentasVencidas = useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
 
-  const deudaVencida = cuentasFiltradas
-    .filter((c) => {
-      if (!c.vencimiento) return false;
-      const v = new Date(c.vencimiento);
-      return v < hoy && isPendiente(c.estado);
-    })
-    .reduce((acc, c) => acc + c.importe, 0);
+    return cuentasFiltradas.filter((item) => {
+      if (!item.vencimiento || !isPending(item.estado)) return false;
 
-  // ================= ALERTAS =================
+      const vencimiento = parseDate(item.vencimiento);
+      return vencimiento && vencimiento < hoy;
+    });
+  }, [cuentasFiltradas]);
 
-  const alertas = [];
+  const deudaVencida = cuentasVencidas.reduce(
+    (acc, item) => acc + toNumber(item.importe),
+    0
+  );
 
-  const pendientesBanco = bancosFiltrados.filter(
-    (m) => m.estado !== "Conciliado"
-  ).length;
+  const conciliacionesPendientes = movimientosFiltrados.filter((item) =>
+    isPending(item.estado)
+  );
 
-  if (pendientesBanco > 0) {
-    alertas.push(`${pendientesBanco} movimientos sin conciliar`);
-  }
+  const chartData = useMemo(
+    () => buildMonthlyChartData(ingresosFiltrados, egresosFiltrados),
+    [ingresosFiltrados, egresosFiltrados]
+  );
 
-  if (deudaVencida > 0) {
-    alertas.push("Existen deudas vencidas");
-  }
-
-  if (resultado < 0) {
-    alertas.push("Resultado negativo en el período");
-  }
-
-  // ================= RESULTADO POR SEDE =================
-
-  const resultadoSedes = useMemo(() => {
+  const sedesResumen = useMemo(() => {
     const map = {};
 
-    ingresos.forEach((i) => {
-      const sede = i.sede || "Sin sede";
-      if (!map[sede]) map[sede] = { sede, ingresos: 0, egresos: 0 };
-      map[sede].ingresos += i.importe;
+    ingresosFiltrados.forEach((item) => {
+      const sede = getSedeName(item);
+
+      if (!map[sede]) {
+        map[sede] = {
+          sede,
+          ingresos: 0,
+          egresos: 0,
+          resultado: 0,
+        };
+      }
+
+      map[sede].ingresos += toNumber(item.importe);
     });
 
-    egresos.forEach((e) => {
-      const sede = e.sede || "Sin sede";
-      if (!map[sede]) map[sede] = { sede, ingresos: 0, egresos: 0 };
-      map[sede].egresos += e.importe;
+    egresosFiltrados.forEach((item) => {
+      const sede = getSedeName(item);
+
+      if (!map[sede]) {
+        map[sede] = {
+          sede,
+          ingresos: 0,
+          egresos: 0,
+          resultado: 0,
+        };
+      }
+
+      map[sede].egresos += toNumber(item.importe);
     });
 
-    return Object.values(map).map((s) => ({
-      ...s,
-      resultado: s.ingresos - s.egresos,
-    }));
-  }, [ingresos, egresos]);
+    return Object.values(map)
+      .map((item) => ({
+        ...item,
+        resultado: item.ingresos - item.egresos,
+      }))
+      .sort((a, b) => b.resultado - a.resultado);
+  }, [ingresosFiltrados, egresosFiltrados]);
 
-  // ================= UI =================
+  const bancosPorCuenta = useMemo(() => {
+    const map = {};
+
+    movimientosFiltrados.forEach((item) => {
+      if (!map[item.cuenta]) {
+        map[item.cuenta] = {
+          cuenta: item.cuenta,
+          saldo: 0,
+          pendientes: 0,
+        };
+      }
+
+      map[item.cuenta].saldo +=
+        item.tipo === "Egreso" ? -toNumber(item.importe) : toNumber(item.importe);
+
+      if (isPending(item.estado)) map[item.cuenta].pendientes += 1;
+    });
+
+    return Object.values(map).sort((a, b) => b.saldo - a.saldo);
+  }, [movimientosFiltrados]);
+
+  const rows = sedesResumen.map((item) => ({
+    sede: item.sede,
+    ingresos: formatMoney(item.ingresos),
+    egresos: formatMoney(item.egresos),
+    resultado: formatMoney(item.resultado),
+    rentabilidad:
+      item.ingresos > 0
+        ? `${Math.round((item.resultado / item.ingresos) * 100)}%`
+        : "0%",
+  }));
+
+  const bancosRows = bancosPorCuenta.map((item) => ({
+    cuenta: item.cuenta,
+    saldo: formatMoney(item.saldo),
+    pendientes: item.pendientes,
+  }));
+
+  if (loading) {
+    return (
+      <section className="page">
+        <div className="page-header">
+          <div>
+            <h2>Dashboard principal</h2>
+            <p>Cargando información financiera...</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="page">
+        <div className="page-header">
+          <div>
+            <h2>Dashboard principal</h2>
+            <p>{error}</p>
+          </div>
+
+          <button className="secondary-button" onClick={loadDashboard}>
+            <RefreshCw size={16} /> Reintentar
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="page">
       <div className="page-header">
         <div>
-          <h2>Dashboard</h2>
-          <p>Resumen financiero general del sistema</p>
+          <h2>Dashboard principal</h2>
+          <p>Resumen financiero y operativo del laboratorio.</p>
         </div>
+
+        <button className="secondary-button" onClick={loadDashboard}>
+          <RefreshCw size={16} /> Actualizar
+        </button>
       </div>
 
-      {/* KPIs */}
       <div className="stats-grid">
-        <div className="stat-card">
-          <span>Resultado</span>
-          <strong>{formatMoney(resultado)}</strong>
-          <TrendingUp size={20} />
+        <StatCard
+          title="Ingresos"
+          value={formatMoney(totalIngresos)}
+          detail={`${ingresosFiltrados.length} registros`}
+          icon={<ArrowDownCircle size={22} />}
+        />
+
+        <StatCard
+          title="Egresos"
+          value={formatMoney(totalEgresos)}
+          detail={`${egresosFiltrados.length} registros`}
+          icon={<ArrowUpCircle size={22} />}
+        />
+
+        <StatCard
+          title="Resultado"
+          value={formatMoney(resultado)}
+          detail={resultado >= 0 ? "Resultado positivo" : "Resultado negativo"}
+          icon={<TrendingUp size={22} />}
+        />
+
+        <StatCard
+          title="Caja bancaria"
+          value={formatMoney(cajaBancos)}
+          detail={`${movimientosFiltrados.length} movimientos`}
+          icon={<Wallet size={22} />}
+        />
+
+        <StatCard
+          title="A cobrar"
+          value={formatMoney(aCobrar)}
+          detail="Cuentas corrientes pendientes"
+          icon={<Banknote size={22} />}
+        />
+
+        <StatCard
+          title="A pagar"
+          value={formatMoney(aPagar)}
+          detail="Proveedores pendientes"
+          icon={<Banknote size={22} />}
+        />
+
+        <StatCard
+          title="Deuda vencida"
+          value={formatMoney(deudaVencida)}
+          detail={`${cuentasVencidas.length} comprobantes vencidos`}
+          icon={<AlertTriangle size={22} />}
+        />
+
+        <StatCard
+          title="Sin conciliar"
+          value={conciliacionesPendientes.length}
+          detail="Movimientos bancarios pendientes"
+          icon={<AlertTriangle size={22} />}
+        />
+      </div>
+
+      <div className="charts-grid">
+        <div className="panel">
+          <h3>Ingresos vs egresos</h3>
+
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="periodo" />
+              <YAxis tickFormatter={(value) => `$${Number(value) / 1000}k`} />
+              <Tooltip formatter={(value) => formatMoney(value)} />
+              <Line
+                type="monotone"
+                dataKey="ingresos"
+                stroke="#019cc5"
+                strokeWidth={3}
+              />
+              <Line
+                type="monotone"
+                dataKey="egresos"
+                stroke="#3a73b9"
+                strokeWidth={3}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
 
-        <div className="stat-card">
-          <span>Caja</span>
-          <strong>{formatMoney(caja)}</strong>
-          <Wallet size={20} />
-        </div>
+        <div className="panel">
+          <h3>Resultado por sede</h3>
 
-        <div className="stat-card">
-          <span>A cobrar</span>
-          <strong>{formatMoney(aCobrar)}</strong>
-          <Banknote size={20} />
-        </div>
-
-        <div className="stat-card">
-          <span>A pagar</span>
-          <strong>{formatMoney(aPagar)}</strong>
-          <Banknote size={20} />
-        </div>
-
-        <div className="stat-card">
-          <span>Deuda vencida</span>
-          <strong>{formatMoney(deudaVencida)}</strong>
-          <AlertTriangle size={20} />
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={sedesResumen}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="sede" />
+              <YAxis tickFormatter={(value) => `$${Number(value) / 1000}k`} />
+              <Tooltip formatter={(value) => formatMoney(value)} />
+              <Bar dataKey="resultado" fill="#3eb9b1" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
-      {/* ALERTAS */}
-      <div className="panel" style={{ marginTop: 20 }}>
-        <h3>Alertas</h3>
+      <div className="charts-grid">
+        <div className="panel">
+          <h3>Resultado mensual</h3>
 
-        {alertas.length === 0 && (
-          <p style={{ color: "#6b7280" }}>Sin alertas</p>
-        )}
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="periodo" />
+              <YAxis tickFormatter={(value) => `$${Number(value) / 1000}k`} />
+              <Tooltip formatter={(value) => formatMoney(value)} />
+              <Bar dataKey="resultado" fill="#028baf" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
 
-        {alertas.map((a, i) => (
-          <div key={i} className="alert-item warning">
-            <Activity size={16} /> {a}
+        <div className="panel">
+          <h3>Caja por cuenta</h3>
+
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={bancosPorCuenta}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="cuenta" />
+              <YAxis tickFormatter={(value) => `$${Number(value) / 1000}k`} />
+              <Tooltip formatter={(value) => formatMoney(value)} />
+              <Bar dataKey="saldo" fill="#3a73b9" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="content-grid">
+        <div className="panel wide">
+          <h3>Resumen por sede</h3>
+
+          <DataTable
+            columns={["Sede", "Ingresos", "Egresos", "Resultado", "Rentabilidad"]}
+            rows={rows}
+          />
+        </div>
+
+        <div className="panel">
+          <h3>Alertas</h3>
+
+          <div className="alert-item danger">
+            <strong>{cuentasVencidas.length} cuentas vencidas</strong>
+            <span>Total: {formatMoney(deudaVencida)}</span>
           </div>
-        ))}
+
+          <div className="alert-item warning">
+            <strong>{conciliacionesPendientes.length} movimientos sin conciliar</strong>
+            <span>Requieren revisión bancaria</span>
+          </div>
+
+          <div className="alert-item info">
+            <strong>{cuentasFiltradas.length} registros en cuentas corrientes</strong>
+            <span>Control operativo general</span>
+          </div>
+        </div>
       </div>
 
-      {/* RESULTADO POR SEDE */}
-      <div className="panel" style={{ marginTop: 20 }}>
-        <h3>Resultado por sede</h3>
+      <div className="panel" style={{ marginTop: 18 }}>
+        <h3>Saldos bancarios por cuenta</h3>
 
-        <div className="table-card">
-          <table>
-            <thead>
-              <tr>
-                <th>Sede</th>
-                <th>Ingresos</th>
-                <th>Egresos</th>
-                <th>Resultado</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {resultadoSedes.map((s) => (
-                <tr key={s.sede}>
-                  <td>{s.sede}</td>
-                  <td>{formatMoney(s.ingresos)}</td>
-                  <td>{formatMoney(s.egresos)}</td>
-                  <td>
-                    <strong>{formatMoney(s.resultado)}</strong>
-                  </td>
-                </tr>
-              ))}
-
-              {resultadoSedes.length === 0 && (
-                <tr>
-                  <td colSpan="4">Sin datos</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable columns={["Cuenta", "Saldo", "Pendientes"]} rows={bancosRows} />
       </div>
     </section>
   );
