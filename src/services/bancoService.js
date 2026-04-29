@@ -164,3 +164,8 @@ export async function conciliarMovimientosPendientes() {
 
   if (error) throw error;
 }
+
+// Aliases para compatibilidad con Bancos.jsx
+export const conciliarMovimientoConIngreso = conciliarConIngreso;
+export const conciliarMovimientoConEgreso = conciliarConEgreso;
+export const desconciliarMovimientoBancario = desconciliarMovimiento;

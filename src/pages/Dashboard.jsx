@@ -1,24 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-    ArrowDownCircle,
-    ArrowUpCircle,
-    TrendingUp,
-    Wallet,
+  TrendingUp,
+  Wallet,
+  AlertTriangle,
+  Banknote,
+  Activity,
 } from "lucide-react";
-import {
-    LineChart,
-    Line,
-    CartesianGrid,
-    XAxis,
-    YAxis,
-    Tooltip,
-    BarChart,
-    Bar,
-    ResponsiveContainer,
-} from "recharts";
-
-import StatCard from "../components/StatCard";
-import DataTable from "../components/DataTable";
 
 import { getIngresos } from "../services/ingresoService";
 import { getEgresos } from "../services/egresoService";
@@ -26,410 +13,251 @@ import { getMovimientosBancarios } from "../services/bancoService";
 import { getCuentasCorrientes } from "../services/cuentaCorrienteService";
 
 const formatMoney = (value = 0) =>
-    `$ ${Number(value || 0).toLocaleString("es-AR")}`;
+  `$ ${Number(value).toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+  })}`;
 
-const toNumber = (value) => Number(value || 0);
+function filterBySede(items, selectedSede) {
+  if (!selectedSede || selectedSede === "Todas las sedes") return items;
+  return items.filter((i) => i.sede === selectedSede || i.sede === "Todas");
+}
 
-const getSedeName = (item) => item?.sede || "Sin sede";
-
-const getFechaReal = (item) => item?.fechaDb || item?.fecha;
-
-const isSameSede = (item, selectedSede) => {
-    if (!selectedSede || selectedSede === "Todas las sedes") return true;
-    return getSedeName(item) === selectedSede;
-};
-
-const isCurrentMonth = (item) => {
-    const fecha = getFechaReal(item);
-    if (!fecha) return false;
-
-    const date = new Date(fecha);
-    const now = new Date();
-
-    return (
-        date.getMonth() === now.getMonth() &&
-        date.getFullYear() === now.getFullYear()
-    );
-};
-
-const isPending = (estado) => {
-    const value = String(estado || "").toLowerCase();
-    return !["cobrado", "pagado", "aplicado", "conciliado"].includes(value);
-};
-
-const monthLabel = (date) =>
-    date.toLocaleDateString("es-AR", {
-        month: "short",
-        year: "2-digit",
-    });
-
-const buildChartData = (ingresos, egresos) => {
-    const now = new Date();
-
-    const months = Array.from({ length: 6 }).map((_, index) => {
-        const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
-
-        return {
-            key: `${date.getFullYear()}-${date.getMonth()}`,
-            dia: monthLabel(date),
-            ingresos: 0,
-            egresos: 0,
-        };
-    });
-
-    const map = Object.fromEntries(months.map((m) => [m.key, m]));
-
-    ingresos.forEach((item) => {
-        const fecha = getFechaReal(item);
-        if (!fecha) return;
-
-        const date = new Date(fecha);
-        const key = `${date.getFullYear()}-${date.getMonth()}`;
-
-        if (map[key]) {
-            map[key].ingresos += toNumber(item.importe);
-        }
-    });
-
-    egresos.forEach((item) => {
-        const fecha = getFechaReal(item);
-        if (!fecha) return;
-
-        const date = new Date(fecha);
-        const key = `${date.getFullYear()}-${date.getMonth()}`;
-
-        if (map[key]) {
-            map[key].egresos += toNumber(item.importe);
-        }
-    });
-
-    return months;
-};
+function isPendiente(estado) {
+  const v = String(estado || "").toLowerCase();
+  return !["cobrado", "pagado", "conciliado", "aplicado"].includes(v);
+}
 
 export default function Dashboard({ selectedSede }) {
-    const [ingresos, setIngresos] = useState([]);
-    const [egresos, setEgresos] = useState([]);
-    const [movimientos, setMovimientos] = useState([]);
-    const [cuentasCorrientes, setCuentasCorrientes] = useState([]);
+  const [ingresos, setIngresos] = useState([]);
+  const [egresos, setEgresos] = useState([]);
+  const [bancos, setBancos] = useState([]);
+  const [cuentas, setCuentas] = useState([]);
 
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        async function loadDashboard() {
-            try {
-                setLoading(true);
-                setError("");
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [i, e, b, c] = await Promise.all([
+        getIngresos(),
+        getEgresos(),
+        getMovimientosBancarios(),
+        getCuentasCorrientes(),
+      ]);
 
-                const [
-                    ingresosData,
-                    egresosData,
-                    movimientosData,
-                    cuentasCorrientesData,
-                ] = await Promise.all([
-                    getIngresos(),
-                    getEgresos(),
-                    getMovimientosBancarios(),
-                    getCuentasCorrientes(),
-                ]);
+      setIngresos(i || []);
+      setEgresos(e || []);
+      setBancos(b || []);
+      setCuentas(c || []);
+    } catch (err) {
+      console.error(err);
+      alert("Error cargando dashboard");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-                setIngresos(ingresosData || []);
-                setEgresos(egresosData || []);
-                setMovimientos(movimientosData || []);
-                setCuentasCorrientes(cuentasCorrientesData || []);
-            } catch (err) {
-                console.error("Error cargando dashboard:", err);
-                setError("No se pudo cargar la información del dashboard.");
-            } finally {
-                setLoading(false);
-            }
-        }
+  useEffect(() => {
+    loadData();
+  }, []);
 
-        loadDashboard();
-    }, []);
+  const ingresosFiltrados = useMemo(
+    () => filterBySede(ingresos, selectedSede),
+    [ingresos, selectedSede]
+  );
 
-    const ingresosFiltrados = useMemo(
-        () => ingresos.filter((item) => isSameSede(item, selectedSede)),
-        [ingresos, selectedSede]
-    );
+  const egresosFiltrados = useMemo(
+    () => filterBySede(egresos, selectedSede),
+    [egresos, selectedSede]
+  );
 
-    const egresosFiltrados = useMemo(
-        () => egresos.filter((item) => isSameSede(item, selectedSede)),
-        [egresos, selectedSede]
-    );
+  const bancosFiltrados = useMemo(
+    () => filterBySede(bancos, selectedSede),
+    [bancos, selectedSede]
+  );
 
-    const movimientosFiltrados = useMemo(
-        () => movimientos.filter((item) => isSameSede(item, selectedSede)),
-        [movimientos, selectedSede]
-    );
+  const cuentasFiltradas = useMemo(
+    () => filterBySede(cuentas, selectedSede),
+    [cuentas, selectedSede]
+  );
 
-    const cuentasFiltradas = useMemo(
-        () => cuentasCorrientes.filter((item) => isSameSede(item, selectedSede)),
-        [cuentasCorrientes, selectedSede]
-    );
+  // ================= KPIs =================
 
-    const totalIngresosPeriodo = useMemo(
-        () =>
-            ingresosFiltrados
-                .filter((item) => isCurrentMonth(item))
-                .reduce((acc, item) => acc + toNumber(item.importe), 0),
-        [ingresosFiltrados]
-    );
+  const totalIngresos = ingresosFiltrados.reduce(
+    (acc, i) => acc + Number(i.importe || 0),
+    0
+  );
 
-    const totalEgresosPeriodo = useMemo(
-        () =>
-            egresosFiltrados
-                .filter((item) => isCurrentMonth(item))
-                .reduce((acc, item) => acc + toNumber(item.importe), 0),
-        [egresosFiltrados]
-    );
+  const totalEgresos = egresosFiltrados.reduce(
+    (acc, e) => acc + Number(e.importe || 0),
+    0
+  );
 
-    const resultadoPeriodo = totalIngresosPeriodo - totalEgresosPeriodo;
+  const resultado = totalIngresos - totalEgresos;
 
-    const resultadoAcumulado = useMemo(() => {
-        const totalIngresos = ingresosFiltrados.reduce(
-            (acc, item) => acc + toNumber(item.importe),
-            0
-        );
+  const caja = bancosFiltrados.reduce((acc, m) => {
+    return m.tipo === "Ingreso"
+      ? acc + m.importe
+      : acc - m.importe;
+  }, 0);
 
-        const totalEgresos = egresosFiltrados.reduce(
-            (acc, item) => acc + toNumber(item.importe),
-            0
-        );
+  const aCobrar = cuentasFiltradas
+    .filter((c) => c.tipoEntidad !== "Proveedor")
+    .reduce((acc, c) => acc + c.importe, 0);
 
-        return totalIngresos - totalEgresos;
-    }, [ingresosFiltrados, egresosFiltrados]);
+  const aPagar = cuentasFiltradas
+    .filter((c) => c.tipoEntidad === "Proveedor")
+    .reduce((acc, c) => acc + c.importe, 0);
 
-    const chartData = useMemo(
-        () => buildChartData(ingresosFiltrados, egresosFiltrados),
-        [ingresosFiltrados, egresosFiltrados]
-    );
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
 
-    const sedesResumen = useMemo(() => {
-        const map = {};
+  const deudaVencida = cuentasFiltradas
+    .filter((c) => {
+      if (!c.vencimiento) return false;
+      const v = new Date(c.vencimiento);
+      return v < hoy && isPendiente(c.estado);
+    })
+    .reduce((acc, c) => acc + c.importe, 0);
 
-        ingresosFiltrados.forEach((item) => {
-            const sede = getSedeName(item);
+  // ================= ALERTAS =================
 
-            if (!map[sede]) {
-                map[sede] = {
-                    sede,
-                    ingresos: 0,
-                    egresos: 0,
-                    resultado: 0,
-                };
-            }
+  const alertas = [];
 
-            map[sede].ingresos += toNumber(item.importe);
-        });
+  const pendientesBanco = bancosFiltrados.filter(
+    (m) => m.estado !== "Conciliado"
+  ).length;
 
-        egresosFiltrados.forEach((item) => {
-            const sede = getSedeName(item);
+  if (pendientesBanco > 0) {
+    alertas.push(`${pendientesBanco} movimientos sin conciliar`);
+  }
 
-            if (!map[sede]) {
-                map[sede] = {
-                    sede,
-                    ingresos: 0,
-                    egresos: 0,
-                    resultado: 0,
-                };
-            }
+  if (deudaVencida > 0) {
+    alertas.push("Existen deudas vencidas");
+  }
 
-            map[sede].egresos += toNumber(item.importe);
-        });
+  if (resultado < 0) {
+    alertas.push("Resultado negativo en el período");
+  }
 
-        return Object.values(map).map((item) => ({
-            ...item,
-            resultado: item.ingresos - item.egresos,
-        }));
-    }, [ingresosFiltrados, egresosFiltrados]);
+  // ================= RESULTADO POR SEDE =================
 
-    const rows = sedesResumen.map((item) => ({
-        sede: item.sede,
-        ingresos: formatMoney(item.ingresos),
-        egresos: formatMoney(item.egresos),
-        resultado: formatMoney(item.resultado),
-        rentabilidad:
-            item.ingresos > 0
-                ? `${Math.round((item.resultado / item.ingresos) * 100)}%`
-                : "0%",
-    }));
+  const resultadoSedes = useMemo(() => {
+    const map = {};
 
-    const conciliacionesPendientes = movimientosFiltrados.filter((item) =>
-        isPending(item.estado)
-    );
-
-    const cuentasVencidas = cuentasFiltradas.filter((item) => {
-        if (!item.vencimiento) return false;
-
-        return new Date(item.vencimiento) < new Date() && isPending(item.estado);
+    ingresos.forEach((i) => {
+      const sede = i.sede || "Sin sede";
+      if (!map[sede]) map[sede] = { sede, ingresos: 0, egresos: 0 };
+      map[sede].ingresos += i.importe;
     });
 
-    const totalConciliacionesPendientes = conciliacionesPendientes.reduce(
-        (acc, item) => acc + toNumber(item.importe),
-        0
-    );
+    egresos.forEach((e) => {
+      const sede = e.sede || "Sin sede";
+      if (!map[sede]) map[sede] = { sede, ingresos: 0, egresos: 0 };
+      map[sede].egresos += e.importe;
+    });
 
-    const totalCuentasVencidas = cuentasVencidas.reduce(
-        (acc, item) => acc + toNumber(item.importe),
-        0
-    );
+    return Object.values(map).map((s) => ({
+      ...s,
+      resultado: s.ingresos - s.egresos,
+    }));
+  }, [ingresos, egresos]);
 
-    if (loading) {
-        return (
-            <section className="page">
-                <div className="page-header">
-                    <div>
-                        <h2>Dashboard principal</h2>
-                        <p>Cargando información financiera...</p>
-                    </div>
-                </div>
-            </section>
-        );
-    }
+  // ================= UI =================
 
-    if (error) {
-        return (
-            <section className="page">
-                <div className="page-header">
-                    <div>
-                        <h2>Dashboard principal</h2>
-                        <p>{error}</p>
-                    </div>
-                </div>
-            </section>
-        );
-    }
+  return (
+    <section className="page">
+      <div className="page-header">
+        <div>
+          <h2>Dashboard</h2>
+          <p>Resumen financiero general del sistema</p>
+        </div>
+      </div>
 
-    return (
-        <section className="page">
-            <div className="page-header">
-                <div>
-                    <h2>Dashboard principal</h2>
-                    <p>Resumen financiero y operativo del laboratorio.</p>
-                </div>
+      {/* KPIs */}
+      <div className="stats-grid">
+        <div className="stat-card">
+          <span>Resultado</span>
+          <strong>{formatMoney(resultado)}</strong>
+          <TrendingUp size={20} />
+        </div>
 
-                <button className="primary-button">Exportar reporte</button>
-            </div>
+        <div className="stat-card">
+          <span>Caja</span>
+          <strong>{formatMoney(caja)}</strong>
+          <Wallet size={20} />
+        </div>
 
-            <div className="stats-grid">
-                <StatCard
-                    title="Ingresos del período"
-                    value={formatMoney(totalIngresosPeriodo)}
-                    detail="Mes actual"
-                    icon={<ArrowDownCircle size={22} />}
-                />
+        <div className="stat-card">
+          <span>A cobrar</span>
+          <strong>{formatMoney(aCobrar)}</strong>
+          <Banknote size={20} />
+        </div>
 
-                <StatCard
-                    title="Egresos del período"
-                    value={formatMoney(totalEgresosPeriodo)}
-                    detail="Mes actual"
-                    icon={<ArrowUpCircle size={22} />}
-                />
+        <div className="stat-card">
+          <span>A pagar</span>
+          <strong>{formatMoney(aPagar)}</strong>
+          <Banknote size={20} />
+        </div>
 
-                <StatCard
-                    title="Resultado del período"
-                    value={formatMoney(resultadoPeriodo)}
-                    detail={
-                        resultadoPeriodo >= 0
-                            ? "Resultado positivo"
-                            : "Resultado negativo"
-                    }
-                    icon={<TrendingUp size={22} />}
-                />
+        <div className="stat-card">
+          <span>Deuda vencida</span>
+          <strong>{formatMoney(deudaVencida)}</strong>
+          <AlertTriangle size={20} />
+        </div>
+      </div>
 
-                <StatCard
-                    title="Resultado acumulado"
-                    value={formatMoney(resultadoAcumulado)}
-                    detail="Total histórico filtrado"
-                    icon={<Wallet size={22} />}
-                />
-            </div>
+      {/* ALERTAS */}
+      <div className="panel" style={{ marginTop: 20 }}>
+        <h3>Alertas</h3>
 
-            <div className="charts-grid">
-                <div className="panel">
-                    <h3>Ingresos y egresos</h3>
+        {alertas.length === 0 && (
+          <p style={{ color: "#6b7280" }}>Sin alertas</p>
+        )}
 
-                    <ResponsiveContainer width="100%" height={280}>
-                        <LineChart data={chartData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="dia" />
-                            <YAxis tickFormatter={(value) => `$${value / 1000}k`} />
-                            <Tooltip formatter={(value) => formatMoney(value)} />
-                            <Line
-                                type="monotone"
-                                dataKey="ingresos"
-                                stroke="#019cc5"
-                                strokeWidth={3}
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="egresos"
-                                stroke="#3a73b9"
-                                strokeWidth={3}
-                            />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
+        {alertas.map((a, i) => (
+          <div key={i} className="alert-item warning">
+            <Activity size={16} /> {a}
+          </div>
+        ))}
+      </div>
 
-                <div className="panel">
-                    <h3>Resultado por sede</h3>
+      {/* RESULTADO POR SEDE */}
+      <div className="panel" style={{ marginTop: 20 }}>
+        <h3>Resultado por sede</h3>
 
-                    <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={sedesResumen}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="sede" />
-                            <YAxis tickFormatter={(value) => `$${value / 1000}k`} />
-                            <Tooltip formatter={(value) => formatMoney(value)} />
-                            <Bar
-                                dataKey="resultado"
-                                fill="#3eb9b1"
-                                radius={[8, 8, 0, 0]}
-                            />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
+        <div className="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>Sede</th>
+                <th>Ingresos</th>
+                <th>Egresos</th>
+                <th>Resultado</th>
+              </tr>
+            </thead>
 
-            <div className="content-grid">
-                <div className="panel wide">
-                    <h3>Resumen por sede</h3>
+            <tbody>
+              {resultadoSedes.map((s) => (
+                <tr key={s.sede}>
+                  <td>{s.sede}</td>
+                  <td>{formatMoney(s.ingresos)}</td>
+                  <td>{formatMoney(s.egresos)}</td>
+                  <td>
+                    <strong>{formatMoney(s.resultado)}</strong>
+                  </td>
+                </tr>
+              ))}
 
-                    <DataTable
-                        columns={[
-                            "Sede",
-                            "Ingresos",
-                            "Egresos",
-                            "Resultado",
-                            "Rentabilidad",
-                        ]}
-                        rows={rows}
-                    />
-                </div>
-
-                <div className="panel">
-                    <h3>Alertas</h3>
-
-                    <div className="alert-item danger">
-                        <strong>{cuentasVencidas.length} cuentas vencidas</strong>
-                        <span>Total: {formatMoney(totalCuentasVencidas)}</span>
-                    </div>
-
-                    <div className="alert-item warning">
-                        <strong>
-                            {conciliacionesPendientes.length} conciliaciones pendientes
-                        </strong>
-                        <span>Total: {formatMoney(totalConciliacionesPendientes)}</span>
-                    </div>
-
-                    <div className="alert-item info">
-                        <strong>
-                            {cuentasFiltradas.length} registros en cuentas corrientes
-                        </strong>
-                        <span>Control operativo general</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-    );
+              {resultadoSedes.length === 0 && (
+                <tr>
+                  <td colSpan="4">Sin datos</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
 }
