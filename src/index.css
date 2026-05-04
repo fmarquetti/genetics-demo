@@ -2009,3 +2009,383 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================
+   TURNOS / SALA DE ESPERA
+   ========================================================= */
+
+.turnos-actions {
+  min-width: 220px;
+  flex-wrap: wrap;
+}
+
+.turnos-actions button {
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.turnos-actions button:hover {
+  background: rgba(1, 156, 197, 0.06);
+}
+
+/* Estados de turnos */
+
+.status-badge.en-espera {
+  background: #fff6dc;
+  color: #9a6b00;
+}
+
+.status-badge.llamado {
+  background: rgba(1, 156, 197, 0.12);
+  color: var(--primary);
+}
+
+.status-badge.en-atencion,
+.status-badge.en-atención {
+  background: rgba(62, 185, 177, 0.14);
+  color: #16847d;
+}
+
+.status-badge.finalizado {
+  background: rgba(62, 185, 177, 0.14);
+  color: #16847d;
+}
+
+.status-badge.ausente {
+  background: #eef2f7;
+  color: #526173;
+}
+
+.status-badge.cancelado {
+  background: #fff0f0;
+  color: #b42318;
+}
+
+/* Prioridad */
+
+.status-badge.normal {
+  background: rgba(1, 156, 197, 0.12);
+  color: var(--primary);
+}
+
+.status-badge.urgente {
+  background: #fff0f0;
+  color: #b42318;
+}
+
+/* =========================================================
+   MODO TV - SALA DE ESPERA
+   ========================================================= */
+
+.turnos-tv-page {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+
+  overflow: auto;
+
+  background:
+    radial-gradient(circle at top left, rgba(1, 156, 197, 0.16), transparent 32%),
+    linear-gradient(135deg, #f7fbfd, #edf6f8);
+
+  border-radius: 0;
+  padding: 34px;
+}
+
+.turnos-tv-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.turnos-tv-header span {
+  display: block;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.turnos-tv-header h2 {
+  margin: 4px 0 0;
+  font-size: clamp(30px, 4vw, 54px);
+  line-height: 1;
+  color: var(--text);
+}
+
+.turnos-tv-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.turnos-tv-panel {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.turnos-tv-panel h3 {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.turnos-tv-panel.highlight {
+  background:
+    radial-gradient(circle at top right, rgba(62, 185, 177, 0.22), transparent 38%),
+    linear-gradient(135deg, #071426, #0b1c33);
+  color: white;
+  border: 0;
+}
+
+.turnos-tv-panel.highlight h3 {
+  color: #aeb9c8;
+}
+
+.turnos-tv-called {
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 26px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: turnosPulse 1.8s ease-in-out infinite;
+}
+
+.turnos-tv-called strong {
+  display: block;
+  font-size: clamp(44px, 6vw, 82px);
+  line-height: 1;
+}
+
+.turnos-tv-called span {
+  display: block;
+  margin-top: 16px;
+  font-size: clamp(22px, 2.5vw, 34px);
+  color: #d7e0ee;
+}
+
+.turnos-tv-row {
+  min-height: 82px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.turnos-tv-row strong {
+  font-size: clamp(22px, 3vw, 34px);
+  color: var(--text);
+}
+
+.turnos-tv-row span {
+  color: var(--muted);
+  font-size: clamp(16px, 2vw, 22px);
+  font-weight: 700;
+}
+
+.turnos-tv-panel.waiting {
+  padding: 24px;
+}
+
+.turnos-tv-waiting-list {
+  display: grid;
+  gap: 12px;
+}
+
+.turnos-tv-waiting-item {
+  display: grid;
+  grid-template-columns: 52px 1fr 180px 120px;
+  gap: 16px;
+  align-items: center;
+
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface-soft);
+}
+
+.turnos-tv-number {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: white;
+  font-weight: 900;
+}
+
+.turnos-tv-waiting-item strong {
+  font-size: clamp(20px, 2.3vw, 30px);
+  color: var(--text);
+}
+
+.turnos-tv-waiting-item span {
+  font-size: clamp(15px, 1.8vw, 22px);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.turnos-tv-waiting-item small {
+  font-size: clamp(13px, 1.5vw, 18px);
+  color: var(--muted);
+  text-align: right;
+}
+
+.turnos-tv-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+
+  color: var(--muted);
+  font-weight: 800;
+  text-align: center;
+}
+
+.turnos-tv-panel.highlight .turnos-tv-empty {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #aeb9c8;
+}
+
+.turnos-tv-page:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(1, 156, 197, 0.16), transparent 32%),
+    linear-gradient(135deg, #f7fbfd, #edf6f8);
+}
+
+.turnos-tv-page:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(1, 156, 197, 0.16), transparent 32%),
+    linear-gradient(135deg, #f7fbfd, #edf6f8);
+}
+
+.turnos-tv-exit {
+  position: fixed;
+  top: 22px;
+  right: 24px;
+  z-index: 10000;
+
+  opacity: 0.25;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.turnos-tv-exit:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+@keyframes turnosPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(62, 185, 177, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(62, 185, 177, 0.12);
+  }
+}
+
+/* =========================================================
+   TURNOS RESPONSIVE
+   ========================================================= */
+
+@media (max-width: 1100px) {
+  .turnos-tv-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .turnos-tv-waiting-item {
+    grid-template-columns: 48px 1fr;
+  }
+
+  .turnos-tv-waiting-item span,
+  .turnos-tv-waiting-item small {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+
+@media (max-width: 800px) {
+  .turnos-actions {
+    min-width: 160px;
+  }
+
+  .turnos-tv-page {
+    min-height: 100vh;
+    padding: 18px;
+    border-radius: 0;
+  }
+
+  .turnos-tv-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .turnos-tv-header h2 {
+    font-size: 30px;
+  }
+
+  .turnos-tv-panel {
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .turnos-tv-called {
+    min-height: 150px;
+  }
+
+  .turnos-tv-called strong {
+    font-size: 42px;
+  }
+
+  .turnos-tv-called span {
+    font-size: 21px;
+  }
+
+  .turnos-tv-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .turnos-tv-waiting-item {
+    grid-template-columns: 42px 1fr;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .turnos-tv-number {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+  }
+}

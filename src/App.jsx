@@ -12,6 +12,7 @@ import Bancos from "./pages/Bancos";
 import Reportes from "./pages/Reportes";
 import Documentos from "./pages/Documentos";
 import Pacientes from "./pages/Pacientes";
+import Turnos from "./pages/Turnos";
 import Sedes from "./pages/Sedes";
 import Usuarios from "./pages/Usuarios";
 import Configuracion from "./pages/Configuracion";
@@ -34,6 +35,7 @@ const getPage = (activePage, selectedSede) => {
     reportes: <Reportes {...props} />,
     documentos: <Documentos {...props} />,
     pacientes: <Pacientes {...props} />,
+    turnos: <Turnos {...props} />,
     sedes: <Sedes {...props} />,
     usuarios: <Usuarios {...props} />,
     configuracion: <Configuracion {...props} />,
