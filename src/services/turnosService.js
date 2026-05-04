@@ -139,7 +139,8 @@ export async function createTurno(form) {
     updated_by: user?.id || null,
   };
 
-  const { data, error } = await buildBaseQuery()
+  const { data, error } = await supabase
+    .from("turnos")
     .insert(payload)
     .select(`
       *,
@@ -179,7 +180,8 @@ export async function updateEstadoTurno(id, estado) {
     payload.atencion_fin = now;
   }
 
-  const { data, error } = await buildBaseQuery()
+  const { data, error } = await supabase
+    .from("turnos")
     .update(payload)
     .eq("id", id)
     .select(`
