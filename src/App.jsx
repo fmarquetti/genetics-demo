@@ -20,6 +20,8 @@ import SetPassword from "./pages/setPassword";
 
 import Footer from "./components/Footer";
 
+import HelpAssistant from "./components/HelpAssistant";
+
 const getPage = (activePage, selectedSede) => {
   const props = { selectedSede };
 
@@ -79,6 +81,7 @@ export default function App() {
         </div>
 
         <Footer />
+        <HelpAssistant activePage={activePage} setActivePage={setActivePage} />
       </main>
     </div>
   );
