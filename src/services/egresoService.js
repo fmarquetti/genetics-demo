@@ -25,8 +25,8 @@ function mapEgreso(row) {
   };
 }
 
-export async function getEgresos() {
-  const { data, error } = await supabase
+export async function getEgresos(sedeId) {
+  let query = supabase
     .from("egresos")
     .select(`
       *,
@@ -37,6 +37,9 @@ export async function getEgresos() {
     `)
     .order("fecha", { ascending: false });
 
+  if (sedeId && sedeId !== "todas") query = query.eq("sede_id", sedeId);
+
+  const { data, error } = await query;
   if (error) throw error;
 
   return data.map(mapEgreso);

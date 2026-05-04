@@ -25,6 +25,7 @@ import {
   getCuentasCorrientes,
   marcarCuentaAplicada,
 } from "../services/cuentaCorrienteService";
+import { formatMoney, formatDate, toDate } from "../utils/format";
 
 const COMPROBANTES_DEUDA = [
   "Factura",
@@ -54,29 +55,6 @@ const emptyForm = {
   importe: "",
   vencimiento: "",
   estado: "Pendiente",
-};
-
-function filterBySede(items, selectedSede) {
-  if (!selectedSede || selectedSede === "Todas las sedes") return items;
-  return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
-}
-
-const formatMoney = (value) =>
-  `$ ${Number(value || 0).toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
-const formatDate = (isoString) => {
-  if (!isoString) return "-";
-  const [year, month, day] = isoString.split("-");
-  if (!year || !month || !day) return isoString;
-  return `${day}/${month}/${year}`;
-};
-
-const toDate = (isoString) => {
-  if (!isoString) return null;
-  return new Date(`${isoString}T00:00:00`);
 };
 
 const safeFileName = (text) =>
@@ -155,7 +133,7 @@ const getNivelRiesgo = (deudaVencida, cuentasACobrar) => {
   return { label: "Bajo", color: "#10b981", detail: "Situación controlada" };
 };
 
-export default function CuentasCorrientes({ selectedSede }) {
+export default function CuentasCorrientes({ selectedSede, sedeId }) {
   const [movimientos, setMovimientos] = useState([]);
   const [sedes, setSedes] = useState([]);
 
@@ -177,8 +155,10 @@ export default function CuentasCorrientes({ selectedSede }) {
     setLoading(true);
 
     try {
+      const idParaFiltro = sedeId === "todas" ? null : sedeId;
+
       const [movimientosData, sedesData] = await Promise.all([
-        getCuentasCorrientes(),
+        getCuentasCorrientes(idParaFiltro),
         getSedes(),
       ]);
 
@@ -199,23 +179,18 @@ export default function CuentasCorrientes({ selectedSede }) {
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  const movimientosPorSede = useMemo(
-    () => filterBySede(movimientos, selectedSede),
-    [movimientos, selectedSede]
-  );
+  }, [sedeId]);
 
   const entidadesUnicas = useMemo(() => {
-    return [...new Set(movimientosPorSede.map((m) => m.entidad))].sort();
-  }, [movimientosPorSede]);
+    return [...new Set(movimientos.map((m) => m.entidad))].sort();
+  }, [movimientos]);
 
   const movimientosFiltrados = useMemo(() => {
     const searchLower = search.toLowerCase().trim();
     const fechaDesde = toDate(desde);
     const fechaHasta = toDate(hasta);
 
-    return movimientosPorSede.filter((item) => {
+    return movimientos.filter((item) => {
       const fechaItem = toDate(item.fecha);
 
       const matchSearch =
@@ -234,7 +209,7 @@ export default function CuentasCorrientes({ selectedSede }) {
 
       return matchSearch && matchTipo && matchEstado && matchDesde && matchHasta;
     });
-  }, [movimientosPorSede, search, tipoFiltro, estadoFiltro, desde, hasta]);
+  }, [movimientos, search, tipoFiltro, estadoFiltro, desde, hasta]);
 
   const resumenPorEntidad = useMemo(() => {
     const resumen = {};
@@ -350,7 +325,7 @@ export default function CuentasCorrientes({ selectedSede }) {
   const detalleLibroMayor = useMemo(() => {
     if (!selectedMayor) return [];
 
-    const entidadMovs = movimientosPorSede
+    const entidadMovs = movimientos
       .filter(
         (m) =>
           m.entidad === selectedMayor.entidad &&
@@ -372,10 +347,13 @@ export default function CuentasCorrientes({ selectedSede }) {
         saldoAcumulado: saldoAcc,
       };
     });
-  }, [movimientosPorSede, selectedMayor]);
+  }, [movimientos, selectedMayor]);
 
   const reporteNombre = useMemo(() => {
-    const sede = selectedSede || "Todas las sedes";
+    const sede =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
     const periodo =
       desde || hasta
         ? `${desde || "inicio"}_${hasta || "actual"}`
@@ -532,7 +510,12 @@ export default function CuentasCorrientes({ selectedSede }) {
 
     // ===== FILTROS =====
     doc.setFontSize(9);
-    doc.text(`Sede: ${selectedSede || "Todas las sedes"}`, 14, 38);
+    const sedePdfName =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
+
+    doc.text(`Sede: ${sedePdfName}`, 14, 38);
     doc.text(`Tipo: ${tipoFiltro}`, 14, 43);
     doc.text(`Estado: ${estadoFiltro}`, 14, 48);
     doc.text(

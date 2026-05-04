@@ -25,8 +25,8 @@ function mapIngreso(row) {
   };
 }
 
-export async function getIngresos() {
-  const { data, error } = await supabase
+export async function getIngresos(sedeId) {
+  let query = supabase
     .from("ingresos")
     .select(`
       *,
@@ -37,6 +37,9 @@ export async function getIngresos() {
     `)
     .order("fecha", { ascending: false });
 
+  if (sedeId && sedeId !== "todas") query = query.eq("sede_id", sedeId);
+
+  const { data, error } = await query;
   if (error) throw error;
 
   return data.map(mapIngreso);

@@ -20,8 +20,8 @@ import SetPassword from "./pages/setPassword";
 
 import Footer from "./components/Footer";
 
-const getPage = (activePage, selectedSede) => {
-  const props = { selectedSede };
+const getPage = (activePage, selectedSede, sedeId) => {
+  const props = { selectedSede, sedeId };
 
   const pages = {
     dashboard: <Dashboard {...props} />,
@@ -43,6 +43,7 @@ const getPage = (activePage, selectedSede) => {
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
   const [selectedSede, setSelectedSede] = useState("Todas las sedes");
+  const [sedeId, setSedeId] = useState("todas");
   const [currentUser, setCurrentUser] = useState(null);
 
   const pathname = window.location.pathname;
@@ -56,7 +57,10 @@ export default function App() {
   }
 
   const effectiveSelectedSede =
-    currentUser.access === "Una sede" ? currentUser.sede : selectedSede;
+    currentUser.acceso === "Una sede" ? currentUser.sede : selectedSede;
+
+  const effectiveSedeId =
+    currentUser.acceso === "Una sede" ? currentUser.sedeId || "todas" : sedeId;
 
   return (
     <div className="app-layout">
@@ -70,12 +74,13 @@ export default function App() {
         <Header
           selectedSede={effectiveSelectedSede}
           setSelectedSede={setSelectedSede}
+          setSedeId={setSedeId}
           currentUser={currentUser}
           onLogout={() => setCurrentUser(null)}
         />
 
         <div className="page-content">
-          {getPage(activePage, effectiveSelectedSede)}
+          {getPage(activePage, effectiveSelectedSede, effectiveSedeId)}
         </div>
 
         <Footer />

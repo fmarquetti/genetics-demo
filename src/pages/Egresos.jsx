@@ -27,6 +27,7 @@ import {
   marcarEgresoPagado,
 } from "../services/egresoService";
 import { getSedes } from "../services/sedeService";
+import { formatMoney, formatDate, toDate } from "../utils/format";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -48,43 +49,6 @@ const emptyForm = {
   importe: "",
   categoria: "Insumos",
   estado: "Pendiente",
-};
-
-function filterBySede(items, selectedSede) {
-  if (!selectedSede || selectedSede === "Todas las sedes") return items;
-  return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
-}
-
-const formatMoney = (value = 0) =>
-  `$ ${Number(value || 0).toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
-const formatDate = (fecha) => {
-  if (!fecha) return "-";
-
-  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
-
-  if (clean.includes("/")) return clean;
-
-  const [year, month, day] = clean.split("-");
-  if (!year || !month || !day) return clean;
-
-  return `${day}/${month}/${year}`;
-};
-
-const toDate = (fecha) => {
-  if (!fecha) return null;
-
-  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
-
-  if (clean.includes("/")) {
-    const [day, month, year] = clean.split("/");
-    return new Date(`${year}-${month}-${day}T00:00:00`);
-  }
-
-  return new Date(`${clean}T00:00:00`);
 };
 
 const getFechaReal = (item) => item?.fechaDb || item?.fecha;
@@ -142,7 +106,7 @@ function formatFechaInput(fecha) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export default function Egresos({ selectedSede }) {
+export default function Egresos({ selectedSede, sedeId }) {
   const facturaInputRef = useRef(null);
 
   const [egresos, setEgresos] = useState([]);
@@ -168,8 +132,10 @@ export default function Egresos({ selectedSede }) {
     setLoading(true);
 
     try {
+      const idParaFiltro = sedeId === "todas" ? null : sedeId;
+
       const [egresosData, sedesData] = await Promise.all([
-        getEgresos(),
+        getEgresos(idParaFiltro),
         getSedes(),
       ]);
 
@@ -190,27 +156,22 @@ export default function Egresos({ selectedSede }) {
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  const egresosPorSede = useMemo(
-    () => filterBySede(egresos, selectedSede),
-    [egresos, selectedSede]
-  );
+  }, [sedeId]);
 
   const categorias = useMemo(() => {
-    return [...new Set(egresosPorSede.map((item) => item.categoria).filter(Boolean))].sort();
-  }, [egresosPorSede]);
+    return [...new Set(egresos.map((item) => item.categoria).filter(Boolean))].sort();
+  }, [egresos]);
 
   const sociedades = useMemo(() => {
-    return [...new Set(egresosPorSede.map((item) => item.sociedad).filter(Boolean))].sort();
-  }, [egresosPorSede]);
+    return [...new Set(egresos.map((item) => item.sociedad).filter(Boolean))].sort();
+  }, [egresos]);
 
   const egresosFiltrados = useMemo(() => {
     const searchValue = search.toLowerCase().trim();
     const fechaDesde = toDate(desde);
     const fechaHasta = toDate(hasta);
 
-    return egresosPorSede.filter((item) => {
+    return egresos.filter((item) => {
       const fechaItem = toDate(getFechaReal(item));
 
       const matchSearch =
@@ -238,7 +199,7 @@ export default function Egresos({ selectedSede }) {
       );
     });
   }, [
-    egresosPorSede,
+    egresos,
     search,
     estadoFiltro,
     categoriaFiltro,
@@ -294,7 +255,10 @@ export default function Egresos({ selectedSede }) {
   }, [egresosFiltrados]);
 
   const nombreArchivo = useMemo(() => {
-    const sede = selectedSede || "Todas las sedes";
+    const sede =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
     const periodo =
       desde || hasta
         ? `${desde || "inicio"}_${hasta || "actual"}`
@@ -426,9 +390,13 @@ export default function Egresos({ selectedSede }) {
       const puntoVenta = String(datos.ptoVta || "").padStart(4, "0");
       const numeroComprobante = String(datos.nroCmp || "").padStart(8, "0");
 
+      const nombreSede =
+        typeof selectedSede === "object" && selectedSede !== null
+          ? selectedSede.nombre
+          : selectedSede;
       const sedeDefault =
-        selectedSede && selectedSede !== "Todas las sedes"
-          ? sedes.find((s) => s.nombre === selectedSede)
+        nombreSede && nombreSede !== "Todas las sedes"
+          ? sedes.find((s) => s.nombre === nombreSede)
           : sedes[0];
 
       setEgresoPendiente({
@@ -508,8 +476,13 @@ export default function Egresos({ selectedSede }) {
       { header: "Valor", key: "valor", width: 20 },
     ];
 
+    const sedeName =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
+
     resumenSheet.addRows([
-      { indicador: "Sede", valor: selectedSede || "Todas las sedes" },
+      { indicador: "Sede", valor: sedeName },
       { indicador: "Desde", valor: desde ? formatDate(desde) : "Inicio" },
       { indicador: "Hasta", valor: hasta ? formatDate(hasta) : "Actual" },
       { indicador: "Total egresos", valor: totalFiltrado },
@@ -614,7 +587,12 @@ export default function Egresos({ selectedSede }) {
     doc.setDrawColor(210);
     doc.line(14, 37, pageWidth - 14, 37);
 
-    doc.text(`Sede: ${selectedSede || "Todas las sedes"}`, 14, 44);
+    const sedePdfName =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
+
+    doc.text(`Sede: ${sedePdfName}`, 14, 44);
     doc.text(`Estado: ${estadoFiltro}`, 14, 49);
     doc.text(`Categoría: ${categoriaFiltro}`, 14, 54);
     doc.text(

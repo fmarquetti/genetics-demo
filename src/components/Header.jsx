@@ -5,6 +5,7 @@ import { getSedes } from "../services/sedeService";
 export default function Header({
   selectedSede,
   setSelectedSede,
+  setSedeId,
   currentUser,
   onLogout,
 }) {
@@ -42,7 +43,12 @@ export default function Header({
         {isAdmin ? (
           <select
             value={selectedSede}
-            onChange={(e) => setSelectedSede(e.target.value)}
+            onChange={(e) => {
+              const nombre = e.target.value;
+              setSelectedSede(nombre);
+              const sede = sedes.find((s) => s.nombre === nombre);
+              setSedeId?.(sede?.id ?? "todas");
+            }}
           >
             <option value="Todas las sedes">Todas las sedes</option>
 

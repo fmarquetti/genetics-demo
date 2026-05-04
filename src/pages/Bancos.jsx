@@ -20,6 +20,7 @@ import Modal from "../components/Modal";
 import { getSedes } from "../services/sedeService";
 import { getIngresos } from "../services/ingresoService";
 import { getEgresos } from "../services/egresoService";
+import { formatMoney, formatDate, toDate } from "../utils/format";
 
 import {
   conciliarMovimientoConEgreso,
@@ -52,36 +53,6 @@ const emptyCuentaForm = {
   sedeId: "",
 };
 
-function filterBySede(items, selectedSede) {
-  if (!selectedSede || selectedSede === "Todas las sedes") return items;
-  return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
-}
-
-const formatMoney = (value = 0) =>
-  `$ ${Number(value || 0).toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
-const formatDate = (fecha) => {
-  if (!fecha) return "-";
-  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
-  if (clean.includes("/")) return clean;
-  const [year, month, day] = clean.split("-");
-  if (!year || !month || !day) return clean;
-  return `${day}/${month}/${year}`;
-};
-
-const toDate = (fecha) => {
-  if (!fecha) return null;
-  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
-  if (clean.includes("/")) {
-    const [day, month, year] = clean.split("/");
-    return new Date(`${year}-${month}-${day}T00:00:00`);
-  }
-  return new Date(`${clean}T00:00:00`);
-};
-
 const getFechaReal = (item) => item.fechaDb || item.fecha;
 
 const safeFileName = (text) =>
@@ -104,7 +75,7 @@ const diferenciaDias = (fechaA, fechaB) => {
   return Math.abs(Math.round((a - b) / (1000 * 60 * 60 * 24)));
 };
 
-export default function Bancos({ selectedSede }) {
+export default function Bancos({ selectedSede, sedeId }) {
   const [movimientos, setMovimientos] = useState([]);
   const [sedes, setSedes] = useState([]);
   const [cuentas, setCuentas] = useState([]);
@@ -132,9 +103,11 @@ export default function Bancos({ selectedSede }) {
     setLoading(true);
 
     try {
+      const idParaFiltro = sedeId === "todas" ? null : sedeId;
+
       const [movimientosData, sedesData, cuentasData, ingresosData, egresosData] =
         await Promise.all([
-          getMovimientosBancarios(),
+          getMovimientosBancarios(idParaFiltro),
           getSedes(),
           getCuentasBancarias(),
           getIngresos(),
@@ -162,23 +135,19 @@ export default function Bancos({ selectedSede }) {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [sedeId]);
 
   const cuentasPorSede = useMemo(() => {
-    return filterBySede(cuentas, selectedSede).filter((cuenta) => cuenta.activa);
-  }, [cuentas, selectedSede]);
-
-  const movimientosPorSede = useMemo(
-    () => filterBySede(movimientos, selectedSede),
-    [movimientos, selectedSede]
-  );
+    if (!selectedSede || selectedSede === "Todas las sedes") return cuentas.filter((c) => c.activa);
+    return cuentas.filter((c) => c.activa && (c.sede === selectedSede || c.sedeId === sedeId));
+  }, [cuentas, selectedSede, sedeId]);
 
   const movimientosFiltrados = useMemo(() => {
     const searchValue = search.toLowerCase().trim();
     const fechaDesde = toDate(desde);
     const fechaHasta = toDate(hasta);
 
-    return movimientosPorSede.filter((mov) => {
+    return movimientos.filter((mov) => {
       const fechaMov = toDate(getFechaReal(mov));
       const estaVinculado = Boolean(mov.ingresoId || mov.egresoId);
 
@@ -202,7 +171,7 @@ export default function Bancos({ selectedSede }) {
 
       return matchSearch && matchEstado && matchTipo && matchCuenta && matchDesde && matchHasta;
     });
-  }, [movimientosPorSede, search, estadoFiltro, tipoFiltro, cuentaFiltro, desde, hasta]);
+  }, [movimientos, search, estadoFiltro, tipoFiltro, cuentaFiltro, desde, hasta]);
 
   const totalIngresos = movimientosFiltrados
     .filter((m) => m.tipo === "Ingreso")
@@ -283,7 +252,10 @@ export default function Bancos({ selectedSede }) {
   }, [candidatosConciliacion]);
 
   const nombreArchivo = useMemo(() => {
-    const sede = selectedSede || "Todas las sedes";
+    const sede =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
     const periodo = desde || hasta ? `${desde || "inicio"}_${hasta || "actual"}` : "todos_los_periodos";
     return `Bancos_${safeFileName(sede)}_${safeFileName(periodo)}`;
   }, [selectedSede, desde, hasta]);
@@ -423,8 +395,13 @@ export default function Bancos({ selectedSede }) {
       { header: "Indicador", key: "indicador", width: 35 },
       { header: "Valor", key: "valor", width: 22 },
     ];
+    const sedeName =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
+
     resumenSheet.addRows([
-      { indicador: "Sede", valor: selectedSede || "Todas las sedes" },
+      { indicador: "Sede", valor: sedeName },
       { indicador: "Ingresos bancarios", valor: totalIngresos },
       { indicador: "Egresos bancarios", valor: totalEgresos },
       { indicador: "Saldo operativo", valor: saldoOperativo },
@@ -509,7 +486,12 @@ export default function Bancos({ selectedSede }) {
     doc.setDrawColor(210);
     doc.line(14, 37, pageWidth - 14, 37);
 
-    doc.text(`Sede: ${selectedSede || "Todas las sedes"}`, 14, 44);
+    const sedePdfName =
+      typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre
+        : selectedSede || "Todas las sedes";
+
+    doc.text(`Sede: ${sedePdfName}`, 14, 44);
     doc.text(`Cuenta: ${cuentaFiltro}`, 14, 49);
     doc.text(`Estado: ${estadoFiltro}`, 14, 54);
     doc.text(`Periodo: ${desde ? formatDate(desde) : "Inicio"} al ${hasta ? formatDate(hasta) : "Actual"}`, 14, 59);

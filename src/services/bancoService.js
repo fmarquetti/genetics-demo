@@ -26,8 +26,8 @@ function mapMovimiento(row) {
   };
 }
 
-export async function getMovimientosBancarios() {
-  const { data, error } = await supabase
+export async function getMovimientosBancarios(sedeId) {
+  let query = supabase
     .from("movimientos_bancarios")
     .select(`
       *,
@@ -38,6 +38,9 @@ export async function getMovimientosBancarios() {
     `)
     .order("fecha", { ascending: false });
 
+  if (sedeId && sedeId !== "todas") query = query.eq("sede_id", sedeId);
+
+  const { data, error } = await query;
   if (error) throw error;
 
   return data.map(mapMovimiento);
