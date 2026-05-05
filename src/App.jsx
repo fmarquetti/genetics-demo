@@ -16,7 +16,7 @@ import Turnos from "./pages/Turnos";
 import Sedes from "./pages/Sedes";
 import Usuarios from "./pages/Usuarios";
 import Configuracion from "./pages/Configuracion";
-
+import { ToastProvider } from "./components/ToastProvider";
 import SetPassword from "./pages/setPassword";
 
 import Footer from "./components/Footer";
@@ -82,8 +82,9 @@ export default function App() {
           {getPage(activePage, effectiveSelectedSede)}
         </div>
 
-        <Footer />
+      <Footer />
         <HelpAssistant activePage={activePage} setActivePage={setActivePage} />
+        <ToastProvider />
       </main>
     </div>
   );
