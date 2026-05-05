@@ -26,6 +26,23 @@ export default function Header({
     }
   }, [isAdmin]);
 
+  function handleChangeSede(e) {
+    const valor = e.target.value;
+    console.log("valor seleccionado:", valor);
+    console.log("sedes disponibles:", sedes);
+    if (valor === "todas") {
+      setSelectedSede({ id: "todas", nombre: "Todas las sedes" });
+    } else {
+      const sede = sedes.find((s) => s.id === valor);
+      console.log("sede encontrada:", sede);
+      if (sede) setSelectedSede({ id: sede.id, nombre: sede.nombre });
+    }
+  }
+  // selectedSede puede ser objeto { id, nombre } o string legacy
+  const valorActual = typeof selectedSede === "object" && selectedSede !== null
+    ? selectedSede.id
+    : "todas";
+
   return (
     <header className="topbar">
       <div>
@@ -40,14 +57,10 @@ export default function Header({
         </div>
 
         {isAdmin ? (
-          <select
-            value={selectedSede}
-            onChange={(e) => setSelectedSede(e.target.value)}
-          >
-            <option value="Todas las sedes">Todas las sedes</option>
-
+          <select value={valorActual} onChange={handleChangeSede}>
+            <option value="todas">Todas las sedes</option>
             {sedes.map((sede) => (
-              <option key={sede.id} value={sede.nombre}>
+              <option key={sede.id} value={sede.id}>
                 {sede.nombre}
               </option>
             ))}

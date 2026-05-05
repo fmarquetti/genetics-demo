@@ -28,6 +28,9 @@ import {
 } from "../services/ingresoService";
 import { getSedes } from "../services/sedeService";
 
+import { formatMoney, formatDate, toDate } from "../utils/format";
+import { toast } from "../components/ToastProvider";
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const emptyForm = {
@@ -41,43 +44,6 @@ const emptyForm = {
   estado: "Pendiente",
 };
 
-function filterBySede(items, selectedSede) {
-  if (!selectedSede || selectedSede === "Todas las sedes") return items;
-  return items.filter((item) => item.sede === selectedSede || item.sede === "Todas");
-}
-
-const formatMoney = (value = 0) =>
-  `$ ${Number(value || 0).toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
-const formatDate = (fecha) => {
-  if (!fecha) return "-";
-
-  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
-
-  if (clean.includes("/")) return clean;
-
-  const [year, month, day] = clean.split("-");
-  if (!year || !month || !day) return clean;
-
-  return `${day}/${month}/${year}`;
-};
-
-const toDate = (fecha) => {
-  if (!fecha) return null;
-
-  const clean = String(fecha).includes("T") ? fecha.split("T")[0] : fecha;
-
-  if (clean.includes("/")) {
-    const [day, month, year] = clean.split("/");
-    return new Date(`${year}-${month}-${day}T00:00:00`);
-  }
-
-  return new Date(`${clean}T00:00:00`);
-};
-
 const getFechaReal = (item) => item?.fechaDb || item?.fecha;
 
 const safeFileName = (text) =>
@@ -89,10 +55,7 @@ const safeFileName = (text) =>
 
 function decodeBase64Url(base64Url) {
   const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64.padEnd(
-    base64.length + ((4 - (base64.length % 4)) % 4),
-    "="
-  );
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
   const jsonString = decodeURIComponent(escape(atob(padded)));
   return JSON.parse(jsonString);
 }
@@ -100,40 +63,28 @@ function decodeBase64Url(base64Url) {
 function extraerDatosQRFiscal(qrText) {
   const url = new URL(qrText);
   const p = url.searchParams.get("p");
-
-  if (!p) {
-    throw new Error("El QR no contiene datos fiscales válidos.");
-  }
-
+  if (!p) throw new Error("El QR no contiene datos fiscales válidos.");
   return decodeBase64Url(p);
 }
 
 function tipoComprobanteLabel(codigo) {
   const tipos = {
-    1: "Factura A",
-    2: "Nota de Débito A",
-    3: "Nota de Crédito A",
-    6: "Factura B",
-    7: "Nota de Débito B",
-    8: "Nota de Crédito B",
-    11: "Factura C",
-    12: "Nota de Débito C",
-    13: "Nota de Crédito C",
+    1: "Factura A", 2: "Nota de Débito A", 3: "Nota de Crédito A",
+    6: "Factura B", 7: "Nota de Débito B", 8: "Nota de Crédito B",
+    11: "Factura C", 12: "Nota de Débito C", 13: "Nota de Crédito C",
     51: "Factura M",
   };
-
   return tipos[codigo] || `Comprobante ${codigo}`;
 }
 
 function formatFechaInput(fecha) {
   if (!fecha) return "";
   if (fecha.includes("-")) return fecha;
-
   const [dd, mm, yyyy] = fecha.split("/");
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export default function Ingresos({ selectedSede }) {
+export default function Ingresos({ selectedSede, sedeId }) {
   const facturaInputRef = useRef(null);
 
   const [ingresos, setIngresos] = useState([]);
@@ -155,55 +106,47 @@ export default function Ingresos({ selectedSede }) {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
-  async function loadData() {
+  async function loadData(currentSedeId = sedeId) {
     setLoading(true);
-
     try {
+      const idParaFiltro = currentSedeId === "todas" ? null : currentSedeId;
       const [ingresosData, sedesData] = await Promise.all([
-        getIngresos(),
+        getIngresos(idParaFiltro),
         getSedes(),
       ]);
-
       setIngresos(ingresosData || []);
       setSedes(sedesData || []);
-
       setForm((prev) => ({
         ...prev,
         sedeId: prev.sedeId || sedesData?.[0]?.id || "",
       }));
     } catch (error) {
-      console.error("Error cargando ingresos:", error);
-      alert(error.message || "No se pudieron cargar los ingresos.");
+      toast.error(error.message || "No se pudieron cargar los ingresos.");
     } finally {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const ingresosPorSede = useMemo(
-    () => filterBySede(ingresos, selectedSede),
-    [ingresos, selectedSede]
-  );
+useEffect(() => {
+  console.log("sedeId recibido:", sedeId);
+  console.log("selectedSede recibido:", selectedSede);
+  loadData(sedeId);
+}, [sedeId]);
 
   const origenes = useMemo(() => {
-    return [...new Set(ingresosPorSede.map((item) => item.origen).filter(Boolean))].sort();
-  }, [ingresosPorSede]);
+    return [...new Set(ingresos.map((item) => item.origen).filter(Boolean))].sort();
+  }, [ingresos]);
 
   const formasCobro = useMemo(() => {
-    return [...new Set(ingresosPorSede.map((item) => item.cobro).filter(Boolean))].sort();
-  }, [ingresosPorSede]);
+    return [...new Set(ingresos.map((item) => item.cobro).filter(Boolean))].sort();
+  }, [ingresos]);
 
   const ingresosFiltrados = useMemo(() => {
     const searchValue = search.toLowerCase().trim();
     const fechaDesde = toDate(desde);
     const fechaHasta = toDate(hasta);
 
-    return ingresosPorSede.filter((item) => {
+    return ingresos.filter((item) => {
       const fechaItem = toDate(getFechaReal(item));
-
       const matchSearch =
         !searchValue ||
         item.concepto?.toLowerCase().includes(searchValue) ||
@@ -215,140 +158,81 @@ export default function Ingresos({ selectedSede }) {
       const matchEstado = estadoFiltro === "Todos" || item.estado === estadoFiltro;
       const matchOrigen = origenFiltro === "Todos" || item.origen === origenFiltro;
       const matchCobro = cobroFiltro === "Todos" || item.cobro === cobroFiltro;
-
       const matchDesde = !fechaDesde || (fechaItem && fechaItem >= fechaDesde);
       const matchHasta = !fechaHasta || (fechaItem && fechaItem <= fechaHasta);
 
-      return (
-        matchSearch &&
-        matchEstado &&
-        matchOrigen &&
-        matchCobro &&
-        matchDesde &&
-        matchHasta
-      );
+      return matchSearch && matchEstado && matchOrigen && matchCobro && matchDesde && matchHasta;
     });
-  }, [ingresosPorSede, search, estadoFiltro, origenFiltro, cobroFiltro, desde, hasta]);
+  }, [ingresos, search, estadoFiltro, origenFiltro, cobroFiltro, desde, hasta]);
 
-  const totalGeneral = ingresosFiltrados.reduce(
-    (acc, item) => acc + Number(item.importe || 0),
-    0
-  );
-
-  const totalCobrado = ingresosFiltrados
-    .filter((i) => i.estado === "Cobrado")
-    .reduce((acc, i) => acc + Number(i.importe || 0), 0);
-
-  const totalPendiente = ingresosFiltrados
-    .filter((i) => i.estado === "Pendiente")
-    .reduce((acc, i) => acc + Number(i.importe || 0), 0);
-
-  const ingresosFiscales = ingresosFiltrados.filter(
-    (item) => item.datosFiscales?.qrUrl
-  );
+  const totalGeneral = ingresosFiltrados.reduce((acc, item) => acc + Number(item.importe || 0), 0);
+  const totalCobrado = ingresosFiltrados.filter((i) => i.estado === "Cobrado").reduce((acc, i) => acc + Number(i.importe || 0), 0);
+  const totalPendiente = ingresosFiltrados.filter((i) => i.estado === "Pendiente").reduce((acc, i) => acc + Number(i.importe || 0), 0);
+  const ingresosFiscales = ingresosFiltrados.filter((item) => item.datosFiscales?.qrUrl);
 
   const resumenPorOrigen = useMemo(() => {
     const map = {};
-
     ingresosFiltrados.forEach((item) => {
       const key = item.origen || "Sin origen";
-
-      if (!map[key]) {
-        map[key] = {
-          origen: key,
-          cantidad: 0,
-          total: 0,
-          cobrado: 0,
-          pendiente: 0,
-        };
-      }
-
+      if (!map[key]) map[key] = { origen: key, cantidad: 0, total: 0, cobrado: 0, pendiente: 0 };
       map[key].cantidad += 1;
       map[key].total += Number(item.importe || 0);
-
       if (item.estado === "Cobrado") map[key].cobrado += Number(item.importe || 0);
       if (item.estado === "Pendiente") map[key].pendiente += Number(item.importe || 0);
     });
-
     return Object.values(map).sort((a, b) => b.total - a.total);
   }, [ingresosFiltrados]);
 
   const nombreArchivo = useMemo(() => {
-    const sede = selectedSede || "Todas las sedes";
-    const periodo =
-      desde || hasta
-        ? `${desde || "inicio"}_${hasta || "actual"}`
-        : "todos_los_periodos";
-
+    const sede = typeof selectedSede === "object" && selectedSede !== null
+      ? selectedSede.nombre
+      : selectedSede || "Todas las sedes";
+    const periodo = desde || hasta
+      ? `${desde || "inicio"}_${hasta || "actual"}`
+      : "todos_los_periodos";
     return `Ingresos_${safeFileName(sede)}_${safeFileName(periodo)}`;
   }, [selectedSede, desde, hasta]);
 
   function aplicarFiltroRapido(tipo) {
     const hoy = new Date();
     const isoHoy = hoy.toISOString().split("T")[0];
-
-    if (tipo === "hoy") {
-      setDesde(isoHoy);
-      setHasta(isoHoy);
-    }
-
+    if (tipo === "hoy") { setDesde(isoHoy); setHasta(isoHoy); }
     if (tipo === "mes") {
-      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-        .toISOString()
-        .split("T")[0];
-
-      setDesde(inicioMes);
+      setDesde(new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split("T")[0]);
       setHasta(isoHoy);
     }
-
-    if (tipo === "pendientes") {
-      setEstadoFiltro("Pendiente");
-    }
-
+    if (tipo === "pendientes") setEstadoFiltro("Pendiente");
     if (tipo === "limpiar") {
-      setSearch("");
-      setEstadoFiltro("Todos");
-      setOrigenFiltro("Todos");
-      setCobroFiltro("Todos");
-      setDesde("");
-      setHasta("");
+      setSearch(""); setEstadoFiltro("Todos"); setOrigenFiltro("Todos");
+      setCobroFiltro("Todos"); setDesde(""); setHasta("");
     }
   }
 
   async function handleCreate(e) {
     e.preventDefault();
     setSaving(true);
-
     try {
       await createIngreso(form);
       await loadData();
-
-      setForm({
-        ...emptyForm,
-        sedeId: sedes[0]?.id || "",
-      });
-
+      setForm({ ...emptyForm, sedeId: sedes[0]?.id || "" });
       setModal(null);
+      toast.success("Ingreso guardado correctamente.");
     } catch (error) {
-      console.error("Error creando ingreso:", error);
-      alert(error.message || "No se pudo crear el ingreso.");
+      toast.error(error.message || "No se pudo crear el ingreso.");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(id) {
-    const confirmDelete = window.confirm("¿Eliminar este ingreso?");
-    if (!confirmDelete) return;
-
+    if (!window.confirm("¿Eliminar este ingreso?")) return;
     setDeletingId(id);
-
     try {
       await deleteIngreso(id);
       await loadData();
+      toast.success("Ingreso eliminado.");
     } catch (error) {
-      console.error("Error eliminando ingreso:", error);
-      alert(error.message || "No se pudo eliminar el ingreso.");
+      toast.error(error.message || "No se pudo eliminar el ingreso.");
     } finally {
       setDeletingId(null);
     }
@@ -358,58 +242,46 @@ export default function Ingresos({ selectedSede }) {
     try {
       await marcarIngresoCobrado(id);
       await loadData();
+      toast.success("Ingreso marcado como cobrado.");
     } catch (error) {
-      console.error("Error marcando ingreso:", error);
-      alert(error.message || "No se pudo marcar como cobrado.");
+      toast.error(error.message || "No se pudo marcar como cobrado.");
     }
   }
 
   async function leerQRDesdePDF(file) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const viewport = page.getViewport({ scale: 2.5 });
-
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d", { willReadFrequently: true });
-
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-
-      await page.render({
-        canvasContext: context,
-        viewport,
-      }).promise;
-
+      await page.render({ canvasContext: context, viewport }).promise;
       const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
       const qr = jsQR(imageData.data, canvas.width, canvas.height);
-
       if (qr?.data) return qr.data;
     }
-
     throw new Error("No se encontró ningún código QR en el PDF.");
   }
 
   async function importarFacturaFiscal(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     try {
       setImportandoFactura(true);
-
       const qrText = await leerQRDesdePDF(file);
       const datos = extraerDatosQRFiscal(qrText);
-
       const tipoComprobante = tipoComprobanteLabel(datos.tipoCmp);
       const puntoVenta = String(datos.ptoVta || "").padStart(4, "0");
       const numeroComprobante = String(datos.nroCmp || "").padStart(8, "0");
 
-      const sedeDefault =
-        selectedSede && selectedSede !== "Todas las sedes"
-          ? sedes.find((s) => s.nombre === selectedSede)
-          : sedes[0];
+      const nombreSede = typeof selectedSede === "object" && selectedSede !== null
+        ? selectedSede.nombre : selectedSede;
+      const sedeDefault = nombreSede && nombreSede !== "Todas las sedes"
+        ? sedes.find((s) => s.nombre === nombreSede)
+        : sedes[0];
 
       setIngresoPendiente({
         fecha: formatFechaInput(datos.fecha),
@@ -422,18 +294,11 @@ export default function Ingresos({ selectedSede }) {
         estado: "Pendiente",
         archivo: file.name,
         comprobante: `${tipoComprobante} ${puntoVenta}-${numeroComprobante}`,
-        datosFiscales: {
-          ...datos,
-          qrUrl: qrText,
-          tipoComprobante,
-          puntoVenta,
-          numeroComprobante,
-        },
+        datosFiscales: { ...datos, qrUrl: qrText, tipoComprobante, puntoVenta, numeroComprobante },
       });
-
       setModal("revisarFactura");
     } catch (error) {
-      alert(error.message || "No se pudo importar la factura.");
+      toast.error(error.message || "No se pudo importar la factura.");
     } finally {
       setImportandoFactura(false);
       e.target.value = "";
@@ -442,223 +307,178 @@ export default function Ingresos({ selectedSede }) {
 
   async function confirmarIngresoImportado(e) {
     e.preventDefault();
-
     if (!ingresoPendiente.concepto.trim()) {
-      alert("Debés cargar el concepto antes de guardar el ingreso.");
+      toast.error("Debés cargar el concepto antes de guardar el ingreso.");
       return;
     }
-
     setSaving(true);
-
     try {
       await createIngreso(ingresoPendiente);
       await loadData();
       setIngresoPendiente(null);
       setModal(null);
+      toast.success("Factura importada y guardada correctamente.");
     } catch (error) {
-      console.error("Error guardando factura importada:", error);
-      alert(error.message || "No se pudo guardar el ingreso importado.");
+      toast.error(error.message || "No se pudo guardar el ingreso importado.");
     } finally {
       setSaving(false);
     }
   }
 
   function verAfip(qrUrl) {
-    if (!qrUrl) {
-      alert("Este comprobante no tiene URL fiscal disponible.");
-      return;
-    }
-
+    if (!qrUrl) { toast.error("Este comprobante no tiene URL fiscal disponible."); return; }
     window.open(qrUrl, "_blank", "noopener,noreferrer");
   }
 
   const exportarExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Genetics - TECNEW";
-    workbook.created = new Date();
+    try {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Genetics - TECNEW";
+      workbook.created = new Date();
+      const sedeName = typeof selectedSede === "object" ? selectedSede?.nombre : selectedSede || "Todas las sedes";
 
-    const resumenSheet = workbook.addWorksheet("Resumen");
-    resumenSheet.columns = [
-      { header: "Indicador", key: "indicador", width: 32 },
-      { header: "Valor", key: "valor", width: 22 },
-    ];
+      const resumenSheet = workbook.addWorksheet("Resumen");
+      resumenSheet.columns = [
+        { header: "Indicador", key: "indicador", width: 32 },
+        { header: "Valor", key: "valor", width: 22 },
+      ];
+      resumenSheet.addRows([
+        { indicador: "Sede", valor: sedeName },
+        { indicador: "Desde", valor: desde ? formatDate(desde) : "Inicio" },
+        { indicador: "Hasta", valor: hasta ? formatDate(hasta) : "Actual" },
+        { indicador: "Total ingresos", valor: totalGeneral },
+        { indicador: "Total cobrado", valor: totalCobrado },
+        { indicador: "Total pendiente", valor: totalPendiente },
+        { indicador: "Comprobantes fiscales", valor: ingresosFiscales.length },
+        { indicador: "Registros filtrados", valor: ingresosFiltrados.length },
+      ]);
 
-    resumenSheet.addRows([
-      { indicador: "Sede", valor: selectedSede || "Todas las sedes" },
-      { indicador: "Desde", valor: desde ? formatDate(desde) : "Inicio" },
-      { indicador: "Hasta", valor: hasta ? formatDate(hasta) : "Actual" },
-      { indicador: "Total ingresos", valor: totalGeneral },
-      { indicador: "Total cobrado", valor: totalCobrado },
-      { indicador: "Total pendiente", valor: totalPendiente },
-      { indicador: "Comprobantes fiscales", valor: ingresosFiscales.length },
-      { indicador: "Registros filtrados", valor: ingresosFiltrados.length },
-    ]);
+      const origenSheet = workbook.addWorksheet("Resumen por origen");
+      origenSheet.columns = [
+        { header: "Origen", key: "origen", width: 24 },
+        { header: "Cantidad", key: "cantidad", width: 12 },
+        { header: "Total", key: "total", width: 18 },
+        { header: "Cobrado", key: "cobrado", width: 18 },
+        { header: "Pendiente", key: "pendiente", width: 18 },
+      ];
+      origenSheet.addRows(resumenPorOrigen);
 
-    const origenSheet = workbook.addWorksheet("Resumen por origen");
-    origenSheet.columns = [
-      { header: "Origen", key: "origen", width: 24 },
-      { header: "Cantidad", key: "cantidad", width: 12 },
-      { header: "Total", key: "total", width: 18 },
-      { header: "Cobrado", key: "cobrado", width: 18 },
-      { header: "Pendiente", key: "pendiente", width: 18 },
-    ];
-    origenSheet.addRows(resumenPorOrigen);
+      const ingresosSheet = workbook.addWorksheet("Ingresos");
+      ingresosSheet.columns = [
+        { header: "Fecha", key: "fecha", width: 14 },
+        { header: "Concepto", key: "concepto", width: 42 },
+        { header: "Sociedad", key: "sociedad", width: 28 },
+        { header: "Sede", key: "sede", width: 24 },
+        { header: "Origen", key: "origen", width: 20 },
+        { header: "Importe", key: "importe", width: 18 },
+        { header: "Cobro", key: "cobro", width: 18 },
+        { header: "Estado", key: "estado", width: 16 },
+        { header: "Comprobante", key: "comprobante", width: 26 },
+        { header: "Archivo", key: "archivo", width: 24 },
+      ];
+      ingresosSheet.addRows(
+        ingresosFiltrados.map((item) => ({
+          fecha: formatDate(getFechaReal(item)),
+          concepto: item.concepto,
+          sociedad: item.sociedad,
+          sede: item.sede,
+          origen: item.origen,
+          importe: item.importe,
+          cobro: item.cobro,
+          estado: item.estado,
+          comprobante: item.comprobante || "",
+          archivo: item.archivo || "",
+        }))
+      );
 
-    const ingresosSheet = workbook.addWorksheet("Ingresos");
-    ingresosSheet.columns = [
-      { header: "Fecha", key: "fecha", width: 14 },
-      { header: "Concepto", key: "concepto", width: 42 },
-      { header: "Sociedad", key: "sociedad", width: 28 },
-      { header: "Sede", key: "sede", width: 24 },
-      { header: "Origen", key: "origen", width: 20 },
-      { header: "Importe", key: "importe", width: 18 },
-      { header: "Cobro", key: "cobro", width: 18 },
-      { header: "Estado", key: "estado", width: 16 },
-      { header: "Comprobante", key: "comprobante", width: 26 },
-      { header: "Archivo", key: "archivo", width: 24 },
-    ];
-
-    ingresosSheet.addRows(
-      ingresosFiltrados.map((item) => ({
-        fecha: formatDate(getFechaReal(item)),
-        concepto: item.concepto,
-        sociedad: item.sociedad,
-        sede: item.sede,
-        origen: item.origen,
-        importe: item.importe,
-        cobro: item.cobro,
-        estado: item.estado,
-        comprobante: item.comprobante || "",
-        archivo: item.archivo || "",
-      }))
-    );
-
-    workbook.worksheets.forEach((sheet) => {
-      sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-      sheet.getRow(1).fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF1E3A8A" },
-      };
-
-      sheet.eachRow((row) => {
-        row.eachCell((cell) => {
-          cell.border = {
-            top: { style: "thin", color: { argb: "FFE5E7EB" } },
-            left: { style: "thin", color: { argb: "FFE5E7EB" } },
-            bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-            right: { style: "thin", color: { argb: "FFE5E7EB" } },
-          };
+      workbook.worksheets.forEach((sheet) => {
+        sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+        sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
+        sheet.eachRow((row) => {
+          row.eachCell((cell) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFE5E7EB" } },
+              left: { style: "thin", color: { argb: "FFE5E7EB" } },
+              bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+              right: { style: "thin", color: { argb: "FFE5E7EB" } },
+            };
+          });
         });
       });
-    });
 
-    [
-      resumenSheet.getColumn("valor"),
-      origenSheet.getColumn("total"),
-      origenSheet.getColumn("cobrado"),
-      origenSheet.getColumn("pendiente"),
-      ingresosSheet.getColumn("importe"),
-    ].forEach((column) => {
-      column.numFmt = '"$"#,##0.00';
-    });
+      [resumenSheet.getColumn("valor"), origenSheet.getColumn("total"), origenSheet.getColumn("cobrado"), origenSheet.getColumn("pendiente"), ingresosSheet.getColumn("importe")].forEach((column) => {
+        column.numFmt = '"$"#,##0.00';
+      });
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const data = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-
-    saveAs(data, `${nombreArchivo}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${nombreArchivo}.xlsx`);
+      toast.success("Excel exportado correctamente.");
+    } catch (error) {
+      toast.error("No se pudo exportar a Excel.");
+    }
   };
 
   const exportarPDF = () => {
-    const doc = new jsPDF("landscape", "mm", "a4");
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
+    try {
+      const doc = new jsPDF("landscape", "mm", "a4");
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const sedeName = typeof selectedSede === "object" ? selectedSede?.nombre : selectedSede || "Todas las sedes";
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.text("GENETICS", 14, 16);
-
-    doc.setFontSize(15);
-    doc.text("Reporte de ingresos", 14, 26);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text("Reporte generado por plataforma creada por TECNEW", 14, 32);
-
-    doc.setDrawColor(210);
-    doc.line(14, 37, pageWidth - 14, 37);
-
-    doc.text(`Sede: ${selectedSede || "Todas las sedes"}`, 14, 44);
-    doc.text(`Estado: ${estadoFiltro}`, 14, 49);
-    doc.text(`Origen: ${origenFiltro}`, 14, 54);
-    doc.text(`Cobro: ${cobroFiltro}`, 14, 59);
-    doc.text(
-      `Periodo: ${desde ? formatDate(desde) : "Inicio"} al ${hasta ? formatDate(hasta) : "Actual"}`,
-      14,
-      64
-    );
-
-    doc.setFont("helvetica", "bold");
-    doc.text(`Total: ${formatMoney(totalGeneral)}`, 155, 44);
-    doc.text(`Cobrado: ${formatMoney(totalCobrado)}`, 155, 49);
-    doc.text(`Pendiente: ${formatMoney(totalPendiente)}`, 155, 54);
-    doc.text(`Comprobantes fiscales: ${ingresosFiscales.length}`, 155, 59);
-
-    autoTable(doc, {
-      startY: 72,
-      head: [["Origen", "Cantidad", "Total", "Cobrado", "Pendiente"]],
-      body: resumenPorOrigen.map((item) => [
-        item.origen,
-        item.cantidad,
-        formatMoney(item.total),
-        formatMoney(item.cobrado),
-        formatMoney(item.pendiente),
-      ]),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [30, 58, 138], textColor: 255 },
-      columnStyles: {
-        1: { halign: "center" },
-        2: { halign: "right" },
-        3: { halign: "right" },
-        4: { halign: "right" },
-      },
-    });
-
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 8,
-      head: [["Fecha", "Concepto", "Sociedad", "Sede", "Origen", "Importe", "Cobro", "Estado"]],
-      body: ingresosFiltrados.map((item) => [
-        formatDate(getFechaReal(item)),
-        item.concepto,
-        item.sociedad,
-        item.sede,
-        item.origen,
-        formatMoney(item.importe),
-        item.cobro,
-        item.estado,
-      ]),
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [30, 58, 138], textColor: 255 },
-      columnStyles: {
-        5: { halign: "right" },
-      },
-    });
-
-    const pageCount = doc.getNumberOfPages();
-
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text("GENETICS", 14, 16);
+      doc.setFontSize(15);
+      doc.text("Reporte de ingresos", 14, 26);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.setTextColor(130);
+      doc.setFontSize(9);
+      doc.text("Reporte generado por plataforma creada por TECNEW", 14, 32);
+      doc.setDrawColor(210);
+      doc.line(14, 37, pageWidth - 14, 37);
+      doc.text(`Sede: ${sedeName}`, 14, 44);
+      doc.text(`Estado: ${estadoFiltro}`, 14, 49);
+      doc.text(`Origen: ${origenFiltro}`, 14, 54);
+      doc.text(`Cobro: ${cobroFiltro}`, 14, 59);
+      doc.text(`Periodo: ${desde ? formatDate(desde) : "Inicio"} al ${hasta ? formatDate(hasta) : "Actual"}`, 14, 64);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Total: ${formatMoney(totalGeneral)}`, 155, 44);
+      doc.text(`Cobrado: ${formatMoney(totalCobrado)}`, 155, 49);
+      doc.text(`Pendiente: ${formatMoney(totalPendiente)}`, 155, 54);
+      doc.text(`Comprobantes fiscales: ${ingresosFiscales.length}`, 155, 59);
 
-      doc.text("Generado por plataforma TECNEW", 14, pageHeight - 8);
-      doc.text(`Página ${i} de ${pageCount}`, pageWidth - 35, pageHeight - 8);
+      autoTable(doc, {
+        startY: 72,
+        head: [["Origen", "Cantidad", "Total", "Cobrado", "Pendiente"]],
+        body: resumenPorOrigen.map((item) => [item.origen, item.cantidad, formatMoney(item.total), formatMoney(item.cobrado), formatMoney(item.pendiente)]),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+        columnStyles: { 1: { halign: "center" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+      });
+
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 8,
+        head: [["Fecha", "Concepto", "Sociedad", "Sede", "Origen", "Importe", "Cobro", "Estado"]],
+        body: ingresosFiltrados.map((item) => [formatDate(getFechaReal(item)), item.concepto, item.sociedad, item.sede, item.origen, formatMoney(item.importe), item.cobro, item.estado]),
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+        columnStyles: { 5: { halign: "right" } },
+      });
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(130);
+        doc.text("Generado por plataforma TECNEW", 14, pageHeight - 8);
+        doc.text(`Página ${i} de ${pageCount}`, pageWidth - 35, pageHeight - 8);
+      }
+
+      doc.save(`${nombreArchivo}.pdf`);
+      toast.success("PDF exportado correctamente.");
+    } catch (error) {
+      toast.error("No se pudo exportar a PDF.");
     }
-
-    doc.save(`${nombreArchivo}.pdf`);
   };
 
   return (
@@ -668,152 +488,75 @@ export default function Ingresos({ selectedSede }) {
           <h2>Ingresos</h2>
           <p>Registro de cobros, obras sociales, prepagas y pagos particulares.</p>
         </div>
-
         <div className="header-actions">
-          <input
-            ref={facturaInputRef}
-            type="file"
-            accept="application/pdf"
-            hidden
-            onChange={importarFacturaFiscal}
-          />
-
-          <button className="secondary-button" onClick={loadData} disabled={loading}>
-            <RefreshCw size={16} /> Actualizar
+          <input ref={facturaInputRef} type="file" accept="application/pdf" hidden onChange={importarFacturaFiscal} />
+          <button className="secondary-button" onClick={loadData} disabled={loading}><RefreshCw size={16} /> Actualizar</button>
+          <button className="secondary-button" onClick={() => facturaInputRef.current?.click()} disabled={importandoFactura}>
+            <Upload size={16} />{importandoFactura ? "Leyendo factura..." : "Importar factura PDF"}
           </button>
-
-          <button
-            className="secondary-button"
-            onClick={() => facturaInputRef.current?.click()}
-            disabled={importandoFactura}
-          >
-            <Upload size={16} />
-            {importandoFactura ? "Leyendo factura..." : "Importar factura PDF"}
-          </button>
-
-          <button className="primary-button" onClick={() => setModal("nuevo")}>
-            <Plus size={16} /> Nuevo ingreso
-          </button>
+          <button className="primary-button" onClick={() => setModal("nuevo")}><Plus size={16} /> Nuevo ingreso</button>
         </div>
       </div>
 
       <div className="stats-grid small">
-        <div className="stat-card">
-          <div>
-            <span>Total ingresos</span>
-            <strong>{formatMoney(totalGeneral)}</strong>
-            <small>{ingresosFiltrados.length} registros filtrados</small>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div>
-            <span>Total cobrado</span>
-            <strong>{formatMoney(totalCobrado)}</strong>
-            <small>Ingresos confirmados</small>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div>
-            <span>Pendiente de cobro</span>
-            <strong>{formatMoney(totalPendiente)}</strong>
-            <small>Ingresos aún no acreditados</small>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div>
-            <span>Facturas fiscales</span>
-            <strong>{ingresosFiscales.length}</strong>
-            <small>Con QR AFIP disponible</small>
-          </div>
-        </div>
+        <div className="stat-card"><div>
+          <span>Total ingresos</span>
+          <strong>{formatMoney(totalGeneral)}</strong>
+          <small>{ingresosFiltrados.length} registros filtrados</small>
+        </div></div>
+        <div className="stat-card"><div>
+          <span>Total cobrado</span>
+          <strong>{formatMoney(totalCobrado)}</strong>
+          <small>Ingresos confirmados</small>
+        </div></div>
+        <div className="stat-card"><div>
+          <span>Pendiente de cobro</span>
+          <strong>{formatMoney(totalPendiente)}</strong>
+          <small>Ingresos aún no acreditados</small>
+        </div></div>
+        <div className="stat-card"><div>
+          <span>Facturas fiscales</span>
+          <strong>{ingresosFiscales.length}</strong>
+          <small>Con QR AFIP disponible</small>
+        </div></div>
       </div>
 
       <div className="filters-bar">
-        <input
-          placeholder="Buscar por concepto, sociedad, sede, origen o comprobante..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-
-        <label className="filter-field">
-          <span>Estado</span>
+        <input placeholder="Buscar por concepto, sociedad, sede, origen o comprobante..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <label className="filter-field"><span>Estado</span>
           <select value={estadoFiltro} onChange={(e) => setEstadoFiltro(e.target.value)}>
-            <option>Todos</option>
-            <option>Cobrado</option>
-            <option>Pendiente</option>
+            <option>Todos</option><option>Cobrado</option><option>Pendiente</option>
           </select>
         </label>
-
-        <label className="filter-field">
-          <span>Origen</span>
+        <label className="filter-field"><span>Origen</span>
           <select value={origenFiltro} onChange={(e) => setOrigenFiltro(e.target.value)}>
             <option>Todos</option>
-            {origenes.map((origen) => (
-              <option key={origen} value={origen}>
-                {origen}
-              </option>
-            ))}
+            {origenes.map((origen) => <option key={origen} value={origen}>{origen}</option>)}
           </select>
         </label>
-
-        <label className="filter-field">
-          <span>Cobro</span>
+        <label className="filter-field"><span>Cobro</span>
           <select value={cobroFiltro} onChange={(e) => setCobroFiltro(e.target.value)}>
             <option>Todos</option>
-            {formasCobro.map((forma) => (
-              <option key={forma} value={forma}>
-                {forma}
-              </option>
-            ))}
+            {formasCobro.map((forma) => <option key={forma} value={forma}>{forma}</option>)}
           </select>
         </label>
-
         <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
         <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
-
-        <button className="secondary-button" onClick={() => aplicarFiltroRapido("hoy")}>
-          Hoy
-        </button>
-
-        <button className="secondary-button" onClick={() => aplicarFiltroRapido("mes")}>
-          Este mes
-        </button>
-
-        <button className="secondary-button" onClick={() => aplicarFiltroRapido("pendientes")}>
-          Pendientes
-        </button>
-
-        <button className="secondary-button" onClick={() => aplicarFiltroRapido("limpiar")}>
-          Limpiar
-        </button>
-
-        <button className="secondary-button" onClick={exportarExcel} disabled={loading}>
-          <FileSpreadsheet size={15} /> Excel
-        </button>
-
-        <button className="primary-button" onClick={exportarPDF} disabled={loading}>
-          <FileText size={15} /> PDF
-        </button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("hoy")}>Hoy</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("mes")}>Este mes</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("pendientes")}>Pendientes</button>
+        <button className="secondary-button" onClick={() => aplicarFiltroRapido("limpiar")}>Limpiar</button>
+        <button className="secondary-button" onClick={exportarExcel} disabled={loading}><FileSpreadsheet size={15} /> Excel</button>
+        <button className="primary-button" onClick={exportarPDF} disabled={loading}><FileText size={15} /> PDF</button>
       </div>
 
       <div className="panel">
         <h3>Resumen por origen</h3>
-
         <div className="table-card">
           <table>
             <thead>
-              <tr>
-                <th>Origen</th>
-                <th>Cantidad</th>
-                <th>Total</th>
-                <th>Cobrado</th>
-                <th>Pendiente</th>
-              </tr>
+              <tr><th>Origen</th><th>Cantidad</th><th>Total</th><th>Cobrado</th><th>Pendiente</th></tr>
             </thead>
-
             <tbody>
               {resumenPorOrigen.map((item) => (
                 <tr key={item.origen}>
@@ -824,11 +567,8 @@ export default function Ingresos({ selectedSede }) {
                   <td>{formatMoney(item.pendiente)}</td>
                 </tr>
               ))}
-
               {!loading && resumenPorOrigen.length === 0 && (
-                <tr>
-                  <td colSpan="5">No hay información para los filtros seleccionados.</td>
-                </tr>
+                <tr><td colSpan="5">No hay información para los filtros seleccionados.</td></tr>
               )}
             </tbody>
           </table>
@@ -837,80 +577,49 @@ export default function Ingresos({ selectedSede }) {
 
       <div className="panel" style={{ marginTop: 18 }}>
         <h3>Detalle de ingresos</h3>
-
         <div className="table-card">
           <table>
             <thead>
               <tr>
-                <th>Fecha</th>
-                <th>Concepto</th>
-                <th>Sociedad</th>
-                <th>Sede</th>
-                <th>Origen</th>
-                <th>Importe</th>
-                <th>Cobro</th>
-                <th>Estado</th>
-                <th>Comprobante</th>
-                <th>Acciones</th>
+                <th>Fecha</th><th>Concepto</th><th>Sociedad</th><th>Sede</th>
+                <th>Origen</th><th>Importe</th><th>Cobro</th><th>Estado</th>
+                <th>Comprobante</th><th>Acciones</th>
               </tr>
             </thead>
-
             <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan="10">Cargando ingresos...</td>
-                </tr>
-              )}
-
-              {!loading &&
-                ingresosFiltrados.map((item) => (
-                  <tr key={item.id}>
-                    <td>{formatDate(getFechaReal(item))}</td>
-                    <td>{item.concepto}</td>
-                    <td>{item.sociedad}</td>
-                    <td>{item.sede}</td>
-                    <td>{item.origen}</td>
-                    <td><strong>{formatMoney(item.importe)}</strong></td>
-                    <td>{item.cobro}</td>
-                    <td>
-                      <span className={`status-badge ${item.estado.toLowerCase()}`}>
-                        {item.estado}
-                      </span>
-                    </td>
-                    <td>{item.comprobante || "-"}</td>
-                    <td>
-                      <div className="table-actions">
-                        {item.datosFiscales?.qrUrl && (
-                          <button
-                            title="Ver comprobante en AFIP"
-                            onClick={() => verAfip(item.datosFiscales.qrUrl)}
-                          >
-                            <ExternalLink size={16} />
-                          </button>
-                        )}
-
-                        {item.estado === "Pendiente" && (
-                          <button title="Marcar como cobrado" onClick={() => marcarCobrado(item.id)}>
-                            <CheckCircle size={16} />
-                          </button>
-                        )}
-
-                        <button
-                          title="Eliminar ingreso"
-                          onClick={() => handleDelete(item.id)}
-                          disabled={deletingId === item.id}
-                        >
-                          <Trash2 size={16} />
+              {loading && <tr><td colSpan="10">Cargando ingresos...</td></tr>}
+              {!loading && ingresosFiltrados.map((item) => (
+                <tr key={item.id}>
+                  <td>{formatDate(getFechaReal(item))}</td>
+                  <td>{item.concepto}</td>
+                  <td>{item.sociedad}</td>
+                  <td>{item.sede}</td>
+                  <td>{item.origen}</td>
+                  <td><strong>{formatMoney(item.importe)}</strong></td>
+                  <td>{item.cobro}</td>
+                  <td><span className={`status-badge ${item.estado.toLowerCase()}`}>{item.estado}</span></td>
+                  <td>{item.comprobante || "-"}</td>
+                  <td>
+                    <div className="table-actions">
+                      {item.datosFiscales?.qrUrl && (
+                        <button title="Ver comprobante en AFIP" onClick={() => verAfip(item.datosFiscales.qrUrl)}>
+                          <ExternalLink size={16} />
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-
-              {!loading && ingresosFiltrados.length === 0 && (
-                <tr>
-                  <td colSpan="10">No se encontraron ingresos.</td>
+                      )}
+                      {item.estado === "Pendiente" && (
+                        <button title="Marcar como cobrado" onClick={() => marcarCobrado(item.id)}>
+                          <CheckCircle size={16} />
+                        </button>
+                      )}
+                      <button title="Eliminar ingreso" onClick={() => handleDelete(item.id)} disabled={deletingId === item.id}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
+              ))}
+              {!loading && ingresosFiltrados.length === 0 && (
+                <tr><td colSpan="10">No se encontraron ingresos.</td></tr>
               )}
             </tbody>
           </table>
@@ -920,106 +629,33 @@ export default function Ingresos({ selectedSede }) {
       {modal === "nuevo" && (
         <Modal title="Nuevo ingreso" onClose={() => setModal(null)}>
           <form className="form-grid" onSubmit={handleCreate}>
-            <label>
-              Fecha
-              <input
-                type="date"
-                required
-                value={form.fecha}
-                onChange={(e) => setForm({ ...form, fecha: e.target.value })}
-              />
-            </label>
-
-            <label>
-              Sociedad
-              <input
-                required
-                value={form.sociedad}
-                onChange={(e) => setForm({ ...form, sociedad: e.target.value })}
-              />
-            </label>
-
-            <label>
-              Sede
-              <select
-                value={form.sedeId}
-                onChange={(e) => setForm({ ...form, sedeId: e.target.value })}
-                required
-              >
-                {sedes.map((sede) => (
-                  <option key={sede.id} value={sede.id}>
-                    {sede.nombre}
-                  </option>
-                ))}
+            <label>Fecha <input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></label>
+            <label>Sociedad <input required value={form.sociedad} onChange={(e) => setForm({ ...form, sociedad: e.target.value })} /></label>
+            <label>Sede
+              <select value={form.sedeId} onChange={(e) => setForm({ ...form, sedeId: e.target.value })} required>
+                {sedes.map((sede) => <option key={sede.id} value={sede.id}>{sede.nombre}</option>)}
               </select>
             </label>
-
-            <label>
-              Origen
-              <select
-                value={form.origen}
-                onChange={(e) => setForm({ ...form, origen: e.target.value })}
-              >
-                <option>Obra Social</option>
-                <option>Prepaga</option>
-                <option>Particular</option>
-                <option>Factura fiscal</option>
+            <label>Origen
+              <select value={form.origen} onChange={(e) => setForm({ ...form, origen: e.target.value })}>
+                <option>Obra Social</option><option>Prepaga</option><option>Particular</option><option>Factura fiscal</option>
               </select>
             </label>
-
-            <label>
-              Importe
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                required
-                value={form.importe}
-                onChange={(e) => setForm({ ...form, importe: e.target.value })}
-              />
-            </label>
-
-            <label>
-              Forma de cobro
-              <select
-                value={form.cobro}
-                onChange={(e) => setForm({ ...form, cobro: e.target.value })}
-              >
-                <option>Transferencia</option>
-                <option>Efectivo</option>
-                <option>Tarjeta</option>
-                <option>Cheque</option>
+            <label>Importe <input type="number" step="0.01" min="0" required value={form.importe} onChange={(e) => setForm({ ...form, importe: e.target.value })} /></label>
+            <label>Forma de cobro
+              <select value={form.cobro} onChange={(e) => setForm({ ...form, cobro: e.target.value })}>
+                <option>Transferencia</option><option>Efectivo</option><option>Tarjeta</option><option>Cheque</option>
               </select>
             </label>
-
-            <label>
-              Estado
-              <select
-                value={form.estado}
-                onChange={(e) => setForm({ ...form, estado: e.target.value })}
-              >
-                <option>Pendiente</option>
-                <option>Cobrado</option>
+            <label>Estado
+              <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}>
+                <option>Pendiente</option><option>Cobrado</option>
               </select>
             </label>
-
-            <label className="full">
-              Concepto
-              <input
-                required
-                value={form.concepto}
-                onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-              />
-            </label>
-
+            <label className="full">Concepto <input required value={form.concepto} onChange={(e) => setForm({ ...form, concepto: e.target.value })} /></label>
             <div className="modal-actions">
-              <button type="button" className="secondary-button" onClick={() => setModal(null)}>
-                Cancelar
-              </button>
-
-              <button type="submit" className="primary-button" disabled={saving}>
-                {saving ? "Guardando..." : "Guardar ingreso"}
-              </button>
+              <button type="button" className="secondary-button" onClick={() => setModal(null)}>Cancelar</button>
+              <button type="submit" className="primary-button" disabled={saving}>{saving ? "Guardando..." : "Guardar ingreso"}</button>
             </div>
           </form>
         </Modal>
@@ -1029,158 +665,44 @@ export default function Ingresos({ selectedSede }) {
         <Modal title="Revisar factura importada" onClose={() => setModal(null)}>
           <form className="form-grid" onSubmit={confirmarIngresoImportado}>
             <div className="full">
-              <p style={{ margin: 0, opacity: 0.75 }}>
-                El sistema leyó los datos fiscales del QR. Completá manualmente el concepto real antes de guardar.
-              </p>
+              <p style={{ margin: 0, opacity: 0.75 }}>El sistema leyó los datos fiscales del QR. Completá manualmente el concepto real antes de guardar.</p>
             </div>
-
-            <label>
-              Fecha
-              <input
-                type="date"
-                required
-                value={ingresoPendiente.fecha}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, fecha: e.target.value })
-                }
-              />
-            </label>
-
-            <label>
-              Comprobante
-              <input value={ingresoPendiente.comprobante} disabled />
-            </label>
-
-            <label>
-              Sociedad / CUIT
-              <input
-                required
-                value={ingresoPendiente.sociedad}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, sociedad: e.target.value })
-                }
-              />
-            </label>
-
-            <label>
-              Sede
-              <select
-                value={ingresoPendiente.sedeId}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, sedeId: e.target.value })
-                }
-                required
-              >
-                {sedes.map((sede) => (
-                  <option key={sede.id} value={sede.id}>
-                    {sede.nombre}
-                  </option>
-                ))}
+            <label>Fecha <input type="date" required value={ingresoPendiente.fecha} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, fecha: e.target.value })} /></label>
+            <label>Comprobante <input value={ingresoPendiente.comprobante} disabled /></label>
+            <label>Sociedad / CUIT <input required value={ingresoPendiente.sociedad} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, sociedad: e.target.value })} /></label>
+            <label>Sede
+              <select value={ingresoPendiente.sedeId} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, sedeId: e.target.value })} required>
+                {sedes.map((sede) => <option key={sede.id} value={sede.id}>{sede.nombre}</option>)}
               </select>
             </label>
-
-            <label>
-              Importe
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                required
-                value={ingresoPendiente.importe}
-                onChange={(e) =>
-                  setIngresoPendiente({
-                    ...ingresoPendiente,
-                    importe: e.target.value,
-                  })
-                }
-              />
-            </label>
-
-            <label>
-              Forma de cobro
-              <select
-                value={ingresoPendiente.cobro}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, cobro: e.target.value })
-                }
-              >
-                <option>Transferencia</option>
-                <option>Efectivo</option>
-                <option>Tarjeta</option>
-                <option>Cheque</option>
+            <label>Importe <input type="number" step="0.01" min="0" required value={ingresoPendiente.importe} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, importe: e.target.value })} /></label>
+            <label>Forma de cobro
+              <select value={ingresoPendiente.cobro} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, cobro: e.target.value })}>
+                <option>Transferencia</option><option>Efectivo</option><option>Tarjeta</option><option>Cheque</option>
               </select>
             </label>
-
-            <label>
-              Estado
-              <select
-                value={ingresoPendiente.estado}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, estado: e.target.value })
-                }
-              >
-                <option>Pendiente</option>
-                <option>Cobrado</option>
+            <label>Estado
+              <select value={ingresoPendiente.estado} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, estado: e.target.value })}>
+                <option>Pendiente</option><option>Cobrado</option>
               </select>
             </label>
-
-            <label>
-              Origen
-              <select
-                value={ingresoPendiente.origen}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, origen: e.target.value })
-                }
-              >
-                <option>Factura fiscal</option>
-                <option>Obra Social</option>
-                <option>Prepaga</option>
-                <option>Particular</option>
+            <label>Origen
+              <select value={ingresoPendiente.origen} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, origen: e.target.value })}>
+                <option>Factura fiscal</option><option>Obra Social</option><option>Prepaga</option><option>Particular</option>
               </select>
             </label>
-
-            <label className="full">
-              Concepto real del ingreso
-              <input
-                required
-                placeholder="Ej: Pago de práctica médica, acreditación de obra social..."
-                value={ingresoPendiente.concepto}
-                onChange={(e) =>
-                  setIngresoPendiente({ ...ingresoPendiente, concepto: e.target.value })
-                }
-              />
+            <label className="full">Concepto real del ingreso
+              <input required placeholder="Ej: Pago de práctica médica, acreditación de obra social..." value={ingresoPendiente.concepto} onChange={(e) => setIngresoPendiente({ ...ingresoPendiente, concepto: e.target.value })} />
             </label>
-
             <div className="full detail-grid">
-              <div>
-                <span>Archivo</span>
-                <strong>{ingresoPendiente.archivo}</strong>
-              </div>
-
-              <div>
-                <span>CAE / CAEA</span>
-                <strong>{ingresoPendiente.datosFiscales.codAut || "-"}</strong>
-              </div>
-
-              <div>
-                <span>Moneda</span>
-                <strong>{ingresoPendiente.datosFiscales.moneda || "-"}</strong>
-              </div>
-
-              <div>
-                <span>Cotización</span>
-                <strong>{ingresoPendiente.datosFiscales.ctz || "-"}</strong>
-              </div>
+              <div><span>Archivo</span><strong>{ingresoPendiente.archivo}</strong></div>
+              <div><span>CAE / CAEA</span><strong>{ingresoPendiente.datosFiscales.codAut || "-"}</strong></div>
+              <div><span>Moneda</span><strong>{ingresoPendiente.datosFiscales.moneda || "-"}</strong></div>
+              <div><span>Cotización</span><strong>{ingresoPendiente.datosFiscales.ctz || "-"}</strong></div>
             </div>
-
             <div className="modal-actions">
-              <button type="button" className="secondary-button" onClick={() => setModal(null)}>
-                Cancelar
-              </button>
-
-              <button type="submit" className="primary-button" disabled={saving}>
-                {saving ? "Guardando..." : "Confirmar y guardar"}
-              </button>
+              <button type="button" className="secondary-button" onClick={() => setModal(null)}>Cancelar</button>
+              <button type="submit" className="primary-button" disabled={saving}>{saving ? "Guardando..." : "Confirmar y guardar"}</button>
             </div>
           </form>
         </Modal>

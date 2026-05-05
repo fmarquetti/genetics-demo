@@ -24,7 +24,11 @@ import Footer from "./components/Footer";
 import HelpAssistant from "./components/HelpAssistant";
 
 const getPage = (activePage, selectedSede) => {
-  const props = { selectedSede };
+  const sedeId = typeof selectedSede === "object" && selectedSede !== null
+    ? selectedSede.id
+    : "todas";
+
+  const props = { selectedSede, sedeId };
 
   const pages = {
     dashboard: <Dashboard {...props} />,
