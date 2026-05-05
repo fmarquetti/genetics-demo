@@ -117,6 +117,45 @@ function sortTurnos(a, b) {
     return new Date(a.horaIngresoDb) - new Date(b.horaIngresoDb);
 }
 
+function getTurnoSortValue(turno, field) {
+    const prioridadOrden = {
+        Urgente: 1,
+        Normal: 2,
+    };
+
+    if (field === "horaIngresoDb") {
+        return new Date(turno.horaIngresoDb).getTime();
+    }
+
+    if (field === "tiempoEspera") {
+        return getWaitMinutes(turno.horaIngresoDb);
+    }
+
+    if (field === "tipoAtencion") {
+        return normalizeText(turno.tipoAtencion);
+    }
+
+    if (field === "areaConsultorio") {
+        return normalizeText(turno.consultorio || turno.area || "");
+    }
+
+    if (field === "prioridad") {
+        return prioridadOrden[turno.prioridad] || 99;
+    }
+
+    return normalizeText(turno[field] || "");
+}
+
+function sortTurnosByField(a, b, field, direction) {
+    const valueA = getTurnoSortValue(a, field);
+    const valueB = getTurnoSortValue(b, field);
+
+    if (valueA < valueB) return direction === "asc" ? -1 : 1;
+    if (valueA > valueB) return direction === "asc" ? 1 : -1;
+
+    return sortTurnos(a, b);
+}
+
 export default function Turnos({ selectedSede }) {
 
     const tvRef = useRef(null);
@@ -133,6 +172,9 @@ export default function Turnos({ selectedSede }) {
     const [estadoFiltro, setEstadoFiltro] = useState("Todos");
     const [tipoFiltro, setTipoFiltro] = useState("Todos");
     const [sedeFiltro, setSedeFiltro] = useState("");
+
+    const [sortField, setSortField] = useState("horaIngresoDb");
+    const [sortDirection, setSortDirection] = useState("asc");
 
     const [form, setForm] = useState(initialForm);
 
@@ -208,8 +250,8 @@ export default function Turnos({ selectedSede }) {
 
                 return matchSearch && matchEstado && matchTipo && matchSede;
             })
-            .sort(sortTurnos);
-    }, [turnos, search, estadoFiltro, tipoFiltro, sedeFiltro]);
+            .sort((a, b) => sortTurnosByField(a, b, sortField, sortDirection));
+    }, [turnos, search, estadoFiltro, tipoFiltro, sedeFiltro, sortField, sortDirection]);
 
     const turnosTv = useMemo(() => {
         return turnosFiltrados.filter((turno) =>
@@ -228,6 +270,15 @@ export default function Turnos({ selectedSede }) {
     const totalEspera = turnos.filter((turno) => turno.estado === "En espera").length;
     const totalLlamados = turnos.filter((turno) => turno.estado === "Llamado").length;
     const totalAtencion = turnos.filter((turno) => turno.estado === "En atención").length;
+
+    function handleSort(field) {
+        if (sortField === field) {
+            setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+        } else {
+            setSortField(field);
+            setSortDirection("asc");
+        }
+    }
 
     function openNuevoTurno() {
         setForm({
@@ -517,15 +568,43 @@ export default function Turnos({ selectedSede }) {
                 <table>
                     <thead>
                         <tr>
-                            <th>Hora</th>
+                            <th>
+                                <button className="th-sort" onClick={() => handleSort("horaIngresoDb")}>
+                                    Hora {sortField === "horaIngresoDb" && (sortDirection === "asc" ? "↑" : "↓")}
+                                </button>
+                            </th>
+
                             <th>Paciente</th>
                             <th>DNI</th>
                             <th>Sede</th>
-                            <th>Tipo</th>
-                            <th>Área / Consultorio</th>
-                            <th>Prioridad</th>
+
+                            <th>
+                                <button className="th-sort" onClick={() => handleSort("tipoAtencion")}>
+                                    Tipo {sortField === "tipoAtencion" && (sortDirection === "asc" ? "↑" : "↓")}
+                                </button>
+                            </th>
+
+                            <th>
+                                <button className="th-sort" onClick={() => handleSort("areaConsultorio")}>
+                                    Área / Consultorio{" "}
+                                    {sortField === "areaConsultorio" && (sortDirection === "asc" ? "↑" : "↓")}
+                                </button>
+                            </th>
+
+                            <th>
+                                <button className="th-sort" onClick={() => handleSort("prioridad")}>
+                                    Prioridad {sortField === "prioridad" && (sortDirection === "asc" ? "↑" : "↓")}
+                                </button>
+                            </th>
+
                             <th>Estado</th>
-                            <th>Espera</th>
+
+                            <th>
+                                <button className="th-sort" onClick={() => handleSort("tiempoEspera")}>
+                                    Espera {sortField === "tiempoEspera" && (sortDirection === "asc" ? "↑" : "↓")}
+                                </button>
+                            </th>
+
                             <th>Acciones</th>
                         </tr>
                     </thead>
